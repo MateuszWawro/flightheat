@@ -641,10 +641,10 @@
   <div id="sidebar">
     <div class="sidebar-section">
       <h3>Obszary</h3>
+      <button class="preset-btn" data-preset="europe">🌍 Europa</button>
       <button class="preset-btn" data-preset="polska">🇵🇱 Polska</button>
       <button class="preset-btn" data-preset="centraleurope">Europa Środkowa</button>
       <button class="preset-btn" data-preset="trojmiasto">Trójmiasto</button>
-      <button class="preset-btn" data-preset="europe">Europa</button>
     </div>
 
     <div class="sidebar-section">
@@ -771,10 +771,10 @@
 <script>
 // ── Presets ─────────────────────────────────────────────────────────────────
 const PRESETS = {
-  polska:        { lamin: 49,   lamax: 55,   lomin: 14,  lomax: 24.5, center: [52, 19.5],  zoom: 6 },
-  centraleurope: { lamin: 45,   lamax: 56,   lomin: 8,   lomax: 28,   center: [50.5, 18],  zoom: 5 },
-  trojmiasto:    { lamin: 54.1, lamax: 54.7, lomin: 17.8,lomax: 19.0, center: [54.4, 18.4],zoom: 10 },
-  europe:        { lamin: 35,   lamax: 60,   lomin: 5,   lomax: 40,   center: [47.5, 22.5], zoom: 4 }
+  europe:        { lamin: 34,   lamax: 72,   lomin: -12, lomax: 42,   center: [50,  15],   zoom: 4 },
+  polska:        { lamin: 49,   lamax: 55,   lomin: 14,  lomax: 24.5, center: [52,  19.5], zoom: 6 },
+  centraleurope: { lamin: 45,   lamax: 56,   lomin: 8,   lomax: 28,   center: [50.5,18],   zoom: 5 },
+  trojmiasto:    { lamin: 54.1, lamax: 54.7, lomin: 17.8,lomax: 19.0, center: [54.4,18.4], zoom: 10 }
 };
 
 // ── Map init ─────────────────────────────────────────────────────────────────
@@ -786,9 +786,9 @@ L.tileLayer('https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png', {
   maxZoom: 19
 }).addTo(map);
 
-// Default view: Polska
-map.setView([52, 19.5], 6);
-setPreset('polska');
+// Default view: Europa
+map.setView([50, 15], 4);
+setPreset('europe');
 
 // Auto-fetch on load
 window.addEventListener('load', () => fetchFlights());
@@ -809,6 +809,7 @@ const HEAT_CONFIGS = {
 let activeLayer = 'density';
 let flightsData = [];
 let markersGroup = L.layerGroup().addTo(map);
+let trackGroup   = L.layerGroup().addTo(map); // flight path layer
 
 // ── State ────────────────────────────────────────────────────────────────────
 let autoTimer = null;
@@ -961,25 +962,70 @@ map.on('zoomend', () => {
   if (flightsData.length > 0) renderMarkers();
 });
 
-// Lazy-load photo when popup opens
+// Lazy-load photo + draw track when popup opens
 map.on('popupopen', async (e) => {
   const el = e.popup.getElement();
-  const wrap = el?.querySelector('[data-photo-icao]');
-  if (!wrap) return;
-  const icao = wrap.dataset.photoIcao;
-  try {
-    const res = await fetch(`/api/aircraft/${icao}`);
-    const data = await res.json();
-    if (data.photoUrl) {
-      wrap.innerHTML = `<img src="${data.photoUrl}" alt="Zdjęcie ${icao}" loading="lazy">`;
-    } else {
+  if (!el) return;
+
+  // ── Photo ──────────────────────────────────────────────────────────────────
+  const wrap = el.querySelector('[data-photo-icao]');
+  if (wrap) {
+    const icao = wrap.dataset.photoIcao;
+    try {
+      const res = await fetch(`/api/aircraft/${icao}`);
+      const data = await res.json();
+      if (data.photoUrl) {
+        wrap.innerHTML = `<img src="${data.photoUrl}" alt="Zdjęcie ${icao}" onerror="this.parentElement.remove()">`;
+      } else {
+        wrap.remove();
+      }
+    } catch {
       wrap.remove();
     }
-  } catch {
-    wrap.remove();
   }
-  e.popup.update(); // re-position after content change
+
+  // ── Track (historical path) ────────────────────────────────────────────────
+  const trackIcao = el.querySelector('[data-track-icao]')?.dataset?.trackIcao;
+  if (!trackIcao) return;
+
+  trackGroup.clearLayers();
+  try {
+    const pts = await fetch(`/api/flights/${trackIcao}/track?hours=6`).then(r => r.json());
+    if (pts.length < 2) return;
+
+    const coords = pts.map(p => [p.lat, p.lon]);
+    const n = coords.length;
+
+    // Draw segments with opacity fading old→new
+    for (let i = 1; i < n; i++) {
+      const t = i / n;
+      L.polyline([coords[i - 1], coords[i]], {
+        color: '#4fc3f7',
+        weight: 2,
+        opacity: 0.15 + 0.75 * t,
+        interactive: false
+      }).addTo(trackGroup);
+    }
+
+    // Dot at each recorded position
+    pts.forEach((p, i) => {
+      const t = i / (n - 1);
+      L.circleMarker([p.lat, p.lon], {
+        radius: i === n - 1 ? 5 : 3,
+        color: '#4fc3f7',
+        fillColor: i === n - 1 ? '#fff' : '#4fc3f7',
+        fillOpacity: 0.15 + 0.8 * t,
+        weight: 1,
+        interactive: false
+      }).addTo(trackGroup);
+    });
+  } catch { /* no track data */ }
 });
+
+// Clear track on popup close
+map.on('popupclose', () => trackGroup.clearLayers());
+
+window._refreshPopup = () => {};  // placeholder — Leaflet updates size on img load via update()
 
 function buildPopup(f) {
   const alt    = f.alt   ? `${Math.round(f.alt)} m`                         : '—';
@@ -990,9 +1036,8 @@ function buildPopup(f) {
 
   const title    = f.callsign || f.icao;
   const reg      = f.registration ? `<span class="popup-reg">• ${f.registration}</span>` : '';
-  const model    = (f.manufacturer || f.model)
-    ? `<div class="popup-model">${[f.manufacturer, f.model].filter(Boolean).join(' ')}</div>`
-    : '';
+  const modelStr = [f.manufacturer, f.model].filter(Boolean).join(' ') || f.typecode || null;
+  const model    = modelStr ? `<div class="popup-model">${modelStr}</div>` : '';
   const operator = f.operator
     ? `<div class="popup-operator">${f.operator}</div>`
     : '';
@@ -1008,7 +1053,7 @@ function buildPopup(f) {
     <div class="popup-row"><span class="popup-key">Kraj reg.</span><span class="popup-val">${f.country || '—'}</span></div>
     <div class="popup-row"><span class="popup-key">ICAO</span><span class="popup-val">${f.icao}</span></div>
     <hr class="popup-divider">
-    <div class="popup-photo-wrap" data-photo-icao="${f.icao}">
+    <div class="popup-photo-wrap" data-photo-icao="${f.icao}" data-track-icao="${f.icao}">
       <span class="popup-photo-loading">Ładowanie zdjęcia…</span>
     </div>
   `;

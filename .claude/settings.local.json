@@ -9,7 +9,31 @@
       "Bash(curl -s \"http://localhost:3000/api/history/stats?hours=24\")",
       "Bash(node -e \"const d=require\\('fs'\\).readFileSync\\('/dev/stdin','utf8'\\); const j=JSON.parse\\(d\\); console.log\\(JSON.stringify\\(j,null,2\\)\\)\")",
       "Bash(pkill -f \"node /Users/mateusz/flight-heat-map/server.js\")",
-      "Bash(python3 -m json.tool)"
+      "Bash(python3 -m json.tool)",
+      "Bash(curl -s \"http://localhost:3000/api/aircraft/4bb0f3\")",
+      "Bash(curl -s -A \"FlightHeat/1.0\" \"https://api.planespotters.net/pub/photos/hex/4bb0f3\")",
+      "Bash(curl -s -A \"FlightHeat/1.0 \\(+https://github.com/flightheat\\)\" \"https://api.planespotters.net/pub/photos/hex/4bb0f3\")",
+      "Bash(node scripts/import-aircraft-db.js)",
+      "Bash(echo \"Import started in background \\(PID $!\\)\")",
+      "Bash(awk '{print $2}')",
+      "Read(//tmp/**)",
+      "Bash(echo \"Import PID: $!\")",
+      "Bash(sqlite3 /Users/mateusz/flight-heat-map/data/flightheat.db \"SELECT COUNT\\(*\\) as total FROM aircraft_db;\")",
+      "Bash(curl -s \"http://localhost:3000/api/aircraft/3c4b5a\")",
+      "Bash(python3 -c \"import sys,json; d=json.load\\(sys.stdin\\); print\\('photoUrl:', d.get\\('photoUrl'\\)\\); print\\('model:', d.get\\('model'\\)\\); print\\('manufacturer:', d.get\\('manufacturer'\\)\\)\")",
+      "Bash(curl -sI \"https://opensky-network.org/datasets/metadata/aircraftDatabase.csv\")",
+      "Bash(curl -sI \"https://opensky-network.org/datasets/metadata/aircraftDatabase.csv.gz\")",
+      "Bash(curl -sI \"https://s3.opensky-network.org/data-samples/metadata/aircraftDatabase.csv\")",
+      "Bash(node -e ' *)",
+      "Bash(python3 -c ' *)",
+      "Bash(curl -s \"http://localhost:3000/api/aircraft/3c675a\")",
+      "Bash(python3 -c \"import sys,json; d=json.load\\(sys.stdin\\); print\\(json.dumps\\(d, indent=2\\)\\)\")",
+      "Bash(sqlite3 /Users/mateusz/flight-heat-map/data/flightheat.db ' *)",
+      "Bash(curl -s \"http://localhost:3000/api/flights/48e9e6/track?hours=24\")",
+      "Bash(curl -s \"http://localhost:3000/api/aircraft/48e9e6\")",
+      "Bash(sqlite3 /Users/mateusz/flight-heat-map/data/flightheat.db \"SELECT * FROM aircraft_db WHERE icao24='502ce3';\")",
+      "Bash(sqlite3 /Users/mateusz/flight-heat-map/data/flightheat.db \"SELECT COUNT\\(*\\) FROM aircraft_db WHERE icao24 LIKE '502%';\")",
+      "Bash(curl -s \"http://localhost:3000/api/aircraft/502ce3\")"
     ]
   }
 }

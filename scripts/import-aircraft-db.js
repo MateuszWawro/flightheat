@@ -9,7 +9,7 @@ const { parse } = require('csv-parse/sync');
 
 // Allow override: node scripts/import-aircraft-db.js /path/to/file.csv.gz
 const localPath = process.argv[2];
-const CSV_URL   = 'https://opensky-network.org/datasets/metadata/aircraftDatabase.csv.gz';
+const CSV_URL   = 'https://opensky-network.org/datasets/metadata/aircraftDatabase.csv';
 
 // Import db from project root
 const db = require('../db');
@@ -32,26 +32,24 @@ async function getBuffer() {
   if (localPath) {
     console.log(`Reading from local file: ${localPath}`);
     const raw = fs.readFileSync(localPath);
-    if (localPath.endsWith('.gz')) {
-      return zlib.gunzipSync(raw);
-    }
+    if (localPath.endsWith('.gz')) return zlib.gunzipSync(raw);
     return raw;
   }
 
-  console.log(`Downloading from: ${CSV_URL}`);
-  const res = await fetch(CSV_URL, {
-    headers: { 'Accept-Encoding': 'gzip' },
-    timeout: 120000
-  });
-  if (!res.ok) throw new Error(`HTTP ${res.status}`);
+  console.log(`Downloading from: ${CSV_URL} (~94 MB, please wait…)`);
+  const res = await fetch(CSV_URL, { timeout: 180000, follow: 20 });
+  if (!res.ok) throw new Error(`HTTP ${res.status} at ${res.url}`);
 
   return new Promise((resolve, reject) => {
     const chunks = [];
-    const gunzip = zlib.createGunzip();
-    res.body.pipe(gunzip);
-    gunzip.on('data', c => chunks.push(c));
-    gunzip.on('end',  () => resolve(Buffer.concat(chunks)));
-    gunzip.on('error', reject);
+    // Support both plain CSV and gzipped responses
+    const contentEncoding = res.headers.get('content-encoding') || '';
+    const stream = contentEncoding.includes('gzip')
+      ? res.body.pipe(zlib.createGunzip())
+      : res.body;
+    stream.on('data', c => chunks.push(c));
+    stream.on('end',  () => resolve(Buffer.concat(chunks)));
+    stream.on('error', reject);
     res.body.on('error', reject);
   });
 }
