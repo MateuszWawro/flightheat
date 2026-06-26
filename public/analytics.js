@@ -4,17 +4,36 @@
 (function () {
   'use strict';
 
+  // ── Region presets ─────────────────────────────────────────────────────────
+  const REGIONS = {
+    polska:        { label: '🇵🇱 Polska',         lamin: 49,   lamax: 55,   lomin: 14,   lomax: 24.5, center: [52, 19.5],  zoom: 6 },
+    europe:        { label: '🌍 Europa',           lamin: 34,   lamax: 72,   lomin: -12,  lomax: 42,   center: [50, 15],    zoom: 4 },
+    centraleurope: { label: 'Europa Środkowa',     lamin: 45,   lamax: 56,   lomin: 8,    lomax: 28,   center: [50.5, 18],  zoom: 5 },
+    trojmiasto:    { label: 'Trójmiasto',          lamin: 54.1, lamax: 54.7, lomin: 17.8, lomax: 19.0, center: [54.4, 18.4],zoom: 10 },
+    elblag:        { label: 'Elbląg',              lamin: 53.9, lamax: 54.4, lomin: 19.0, lomax: 20.0, center: [54.15, 19.4],zoom: 10 },
+  };
+
+  // ── Legend config ──────────────────────────────────────────────────────────
+  const LEGENDS = {
+    density:  { gradient: 'linear-gradient(to right, #00bcd4, #ff9800, #f44336)', min: 'Rzadkie',  max: 'Gęste' },
+    altitude: { gradient: 'linear-gradient(to right, #1a237e, #4fc3f7, #e1f5fe)', min: '0 m',      max: '13 000 m' },
+    speed:    { gradient: 'linear-gradient(to right, #4a148c, #e040fb, #ff80ab)', min: '0 km/h',   max: '900 km/h' },
+  };
+
   // ── State ──────────────────────────────────────────────────────────────────
-  let currentHours = 24;
-  let analyticsMap = null;
-  let heatLayer = null;
+  let currentHours  = 24;
+  let currentRegion = 'polska';
+  let analyticsMap  = null;
+  let heatLayer     = null;
   let activeHeatType = 'density';
+  let heatRadius    = 20;
   let timelineChart = null;
   let countriesChart = null;
+  let lastHeatRows  = [];
 
   // ── Init (called when tab becomes visible) ─────────────────────────────────
   function initAnalytics() {
-    if (analyticsMap) return; // already initialised
+    if (analyticsMap) return;
 
     analyticsMap = L.map('analytics-map', { zoomControl: true, preferCanvas: true });
     L.tileLayer('https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png', {
@@ -22,59 +41,64 @@
       subdomains: 'abcd',
       maxZoom: 19
     }).addTo(analyticsMap);
-    analyticsMap.setView([52, 19.5], 6);
+
+    const r = REGIONS[currentRegion];
+    analyticsMap.setView(r.center, r.zoom);
   }
 
   // ── Fetch all analytics data ───────────────────────────────────────────────
   async function loadAnalytics() {
     const h = currentHours;
+    const r = REGIONS[currentRegion];
     updateCollectorStatus();
-
     setAnalyticsStatus('Ładowanie danych…');
 
     try {
+      const bboxQ = `&lamin=${r.lamin}&lamax=${r.lamax}&lomin=${r.lomin}&lomax=${r.lomax}`;
       const [stats, timeline, heatmap] = await Promise.all([
-        fetch(`/api/history/stats?hours=${h}`).then(r => r.json()),
+        fetch(`/api/history/stats?hours=${h}${bboxQ}`).then(r => r.json()),
         fetch(`/api/history/timeline?hours=${h}&interval=${h >= 168 ? 120 : h >= 24 ? 60 : 15}`).then(r => r.json()),
-        fetch(`/api/history/heatmap?hours=${h}`).then(r => r.json())
+        fetch(`/api/history/heatmap?hours=${h}${bboxQ}`).then(r => r.json())
       ]);
 
       renderStats(stats);
       renderTimeline(timeline);
+      lastHeatRows = heatmap;
       renderHeatmap(heatmap);
+      renderLegend(activeHeatType);
       renderCountries(stats.topCountries || []);
-      setAnalyticsStatus(`Dane z ostatnich ${formatHours(h)} — ${stats.totalFlights.toLocaleString()} rekordów`);
+      updateHistoricalLabel();
+      setAnalyticsStatus(`${r.label} · ${formatHours(h)} · ${stats.totalFlights.toLocaleString()} rek.`);
     } catch (err) {
-      setAnalyticsStatus('Błąd ładowania danych: ' + err.message, true);
+      setAnalyticsStatus('Błąd: ' + err.message, true);
     }
   }
 
   function formatHours(h) {
     if (h < 24) return `${h}h`;
-    return `${h / 24}d`;
+    if (h % 24 === 0) return `${h / 24}d`;
+    return `${Math.floor(h / 24)}d ${h % 24}h`;
   }
 
   // ── Collector status ───────────────────────────────────────────────────────
   async function updateCollectorStatus() {
     try {
       const s = await fetch('/api/collector/status').then(r => r.json());
-      const dot = document.getElementById('collector-dot');
+      const dot   = document.getElementById('collector-dot');
       const label = document.getElementById('collector-label');
-      const time = s.lastRun ? new Date(s.lastRun).toLocaleTimeString('pl-PL', { hour: '2-digit', minute: '2-digit' }) : '—';
+      const time  = s.lastRun ? new Date(s.lastRun).toLocaleTimeString('pl-PL', { hour: '2-digit', minute: '2-digit' }) : '—';
       dot.className = 'collector-dot ' + (s.lastRun ? 'active' : 'inactive');
       label.textContent = s.lastRun
-        ? `Zbieranie aktywne — ostatni snapshot: ${time} (${s.totalRecords.toLocaleString()} rek.)`
-        : 'Zbieranie nieaktywne';
-    } catch {
-      // silent
-    }
+        ? `Kolektor aktywny — ${time} (${s.totalRecords.toLocaleString()} rek.)`
+        : 'Kolektor nieaktywny';
+    } catch { /* silent */ }
   }
 
   // ── Stats cards ────────────────────────────────────────────────────────────
   function renderStats(s) {
-    setText('astat-total', s.totalFlights.toLocaleString());
+    setText('astat-total',  s.totalFlights.toLocaleString());
     setText('astat-unique', s.uniqueAircraft.toLocaleString());
-    setText('astat-alt', s.avgAlt ? `${s.avgAlt.toLocaleString()} m` : '—');
+    setText('astat-alt',    s.avgAlt ? `${s.avgAlt.toLocaleString()} m` : '—');
     const peakTime = s.peakHour
       ? new Date(s.peakHour.time).toLocaleString('pl-PL', { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' })
       : '—';
@@ -94,7 +118,6 @@
       const d = new Date(r.time);
       return d.toLocaleString('pl-PL', { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' });
     });
-    const data = rows.map(r => r.count);
 
     if (timelineChart) timelineChart.destroy();
 
@@ -103,7 +126,7 @@
       data: {
         labels,
         datasets: [{
-          data,
+          data: rows.map(r => r.count),
           borderColor: '#4fc3f7',
           backgroundColor: 'rgba(79,195,247,0.08)',
           borderWidth: 2,
@@ -116,17 +139,13 @@
       options: {
         responsive: true,
         maintainAspectRatio: false,
-        plugins: { legend: { display: false } },
+        plugins: { legend: { display: false }, tooltip: {
+          callbacks: { label: ctx => ` ${ctx.parsed.y} samolotów` }
+        }},
         scales: {
-          x: {
-            ticks: { color: '#6b7a99', maxTicksLimit: 10, maxRotation: 0 },
-            grid: { color: '#1e2d4a' }
-          },
-          y: {
-            ticks: { color: '#6b7a99' },
-            grid: { color: '#1e2d4a' },
-            title: { display: true, text: 'Liczba samolotów', color: '#6b7a99', font: { size: 11 } }
-          }
+          x: { ticks: { color: '#6b7a99', maxTicksLimit: 10, maxRotation: 0 }, grid: { color: '#1e2d4a' } },
+          y: { ticks: { color: '#6b7a99' }, grid: { color: '#1e2d4a' },
+               title: { display: true, text: 'Liczba samolotów', color: '#6b7a99', font: { size: 11 } } }
         }
       }
     });
@@ -139,25 +158,36 @@
     if (!rows.length) return;
 
     const maxCount = Math.max(...rows.map(r => r.count));
-    const maxAlt   = Math.max(...rows.map(r => r.avgAlt || 0));
+    const maxAlt   = Math.max(...rows.map(r => r.avgAlt   || 0));
     const maxSpeed = Math.max(...rows.map(r => r.avgSpeed || 0));
 
     const configs = {
-      density: { pts: rows.map(r => [r.lat, r.lon, r.count / maxCount]),     gradient: { 0.4: '#00bcd4', 0.7: '#ff9800', 1: '#f44336' } },
-      altitude: { pts: rows.map(r => [r.lat, r.lon, (r.avgAlt || 0) / (maxAlt || 1)]),   gradient: { 0.4: '#1a237e', 0.7: '#4fc3f7', 1: '#e1f5fe' } },
-      speed:    { pts: rows.map(r => [r.lat, r.lon, (r.avgSpeed || 0) / (maxSpeed || 1)]), gradient: { 0.4: '#4a148c', 0.7: '#e040fb', 1: '#ff80ab' } }
+      density:  { pts: rows.map(r => [r.lat, r.lon, r.count                  / (maxCount || 1)]), gradient: { 0.4: '#00bcd4', 0.7: '#ff9800', 1: '#f44336' } },
+      altitude: { pts: rows.map(r => [r.lat, r.lon, (r.avgAlt   || 0)        / (maxAlt   || 1)]), gradient: { 0.4: '#1a237e', 0.7: '#4fc3f7', 1: '#e1f5fe' } },
+      speed:    { pts: rows.map(r => [r.lat, r.lon, (r.avgSpeed || 0)        / (maxSpeed || 1)]), gradient: { 0.4: '#4a148c', 0.7: '#e040fb', 1: '#ff80ab' } },
     };
 
     const cfg = configs[activeHeatType];
-    heatLayer = L.heatLayer(cfg.pts, { radius: 20, blur: 15, maxZoom: 10, gradient: cfg.gradient });
+    heatLayer = L.heatLayer(cfg.pts, { radius: heatRadius, blur: Math.round(heatRadius * 0.75), maxZoom: 10, gradient: cfg.gradient });
     heatLayer.addTo(analyticsMap);
+  }
+
+  // ── Legend ─────────────────────────────────────────────────────────────────
+  function renderLegend(type) {
+    const bar   = document.getElementById('a-legend-bar');
+    const minEl = document.getElementById('a-legend-min');
+    const maxEl = document.getElementById('a-legend-max');
+    if (!bar) return;
+    const lg = LEGENDS[type] || LEGENDS.density;
+    bar.style.background = lg.gradient;
+    if (minEl) minEl.textContent = lg.min;
+    if (maxEl) maxEl.textContent = lg.max;
   }
 
   // ── Countries bar chart ────────────────────────────────────────────────────
   function renderCountries(rows) {
     const ctx = document.getElementById('countries-chart');
     if (!ctx) return;
-
     if (countriesChart) countriesChart.destroy();
     if (!rows.length) return;
 
@@ -199,18 +229,36 @@
     el.className = 'analytics-status' + (isError ? ' error' : '');
   }
 
-  // ── Event wiring (called after DOM ready) ──────────────────────────────────
+  function updateHistoricalLabel() {
+    const r  = REGIONS[currentRegion];
+    const el = document.getElementById('historical-label');
+    if (el) el.textContent = `${r.label} · ostatnie ${formatHours(currentHours)}`;
+  }
+
+  // ── Event wiring ───────────────────────────────────────────────────────────
   function wire() {
-    // Time range pills
-    document.querySelectorAll('.time-pill').forEach(btn => {
+    // Region selector
+    document.querySelectorAll('.aregion-btn').forEach(btn => {
       btn.addEventListener('click', () => {
-        document.querySelectorAll('.time-pill').forEach(b => b.classList.remove('active'));
+        document.querySelectorAll('.aregion-btn').forEach(b => b.classList.remove('active'));
         btn.classList.add('active');
-        currentHours = parseInt(btn.dataset.hours);
-        updateHistoricalLabel();
+        currentRegion = btn.dataset.region;
+        const r = REGIONS[currentRegion];
+        if (analyticsMap) analyticsMap.flyTo(r.center, r.zoom, { duration: 0.8 });
         loadAnalytics();
       });
     });
+
+    // Time slider
+    const slider   = document.getElementById('time-slider');
+    const sliderVal= document.getElementById('time-slider-val');
+    if (slider) {
+      slider.addEventListener('input', () => {
+        currentHours = parseInt(slider.value);
+        if (sliderVal) sliderVal.textContent = formatHours(currentHours);
+      });
+      slider.addEventListener('change', () => loadAnalytics());
+    }
 
     // Refresh button
     document.getElementById('analytics-refresh')?.addEventListener('click', loadAnalytics);
@@ -221,17 +269,21 @@
         document.querySelectorAll('.aheat-btn').forEach(b => b.classList.remove('active'));
         btn.classList.add('active');
         activeHeatType = btn.dataset.type;
-        // Re-render heatmap with current data (lazy: just reload)
-        fetch(`/api/history/heatmap?hours=${currentHours}`)
-          .then(r => r.json())
-          .then(renderHeatmap);
+        renderLegend(activeHeatType);
+        renderHeatmap(lastHeatRows);
       });
     });
-  }
 
-  function updateHistoricalLabel() {
-    const el = document.getElementById('historical-label');
-    if (el) el.textContent = `Dane historyczne — ostatnie ${formatHours(currentHours)}`;
+    // Radius slider
+    const radSlider = document.getElementById('a-radius');
+    const radVal    = document.getElementById('a-radius-val');
+    if (radSlider) {
+      radSlider.addEventListener('input', () => {
+        heatRadius = parseInt(radSlider.value);
+        if (radVal) radVal.textContent = `${heatRadius}px`;
+        renderHeatmap(lastHeatRows);
+      });
+    }
   }
 
   // ── Public API ─────────────────────────────────────────────────────────────

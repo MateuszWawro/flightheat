@@ -3,7 +3,6 @@ const fetch = require('node-fetch');
 const path = require('path');
 const db = require('./db');
 const { startCollector, getStatus } = require('./collector');
-const { lookupAircraft } = require('./aircraft');
 
 const app = express();
 const PORT = process.env.PORT || 3000;
@@ -12,31 +11,74 @@ const OPENSKY_PASS = process.env.OPENSKY_PASS || '';
 const ALERTS_USER  = process.env.ALERTS_USER  || 'admin';
 const ALERTS_PASS  = process.env.ALERTS_PASS  || 'admin';
 
-// Caches
+// ── Security headers ──────────────────────────────────────────────────────────
+app.use((req, res, next) => {
+  res.setHeader('X-Content-Type-Options', 'nosniff');
+  res.setHeader('X-Frame-Options', 'SAMEORIGIN');
+  res.setHeader('Referrer-Policy', 'no-referrer');
+  next();
+});
+
+// ── Caches ────────────────────────────────────────────────────────────────────
 const flightCache = new Map();
-const CACHE_TTL_MS = 15000;
+const CACHE_TTL_MS = 15_000;
 const photoCache = new Map();
 const PHOTO_TTL_MS = 60 * 60 * 1000;
 
+// Evict stale cache entries every minute to prevent unbounded growth
+setInterval(() => {
+  const now = Date.now();
+  for (const [k, v] of flightCache) if (now - v.timestamp > CACHE_TTL_MS) flightCache.delete(k);
+  for (const [k, v] of photoCache) if (now > v.expires) photoCache.delete(k);
+}, 60_000);
+
+// ── aircraft_db availability — checked once at startup ────────────────────────
+let aircraftDbAvailable = false;
+try { db.prepare('SELECT 1 FROM aircraft_db LIMIT 1').get(); aircraftDbAvailable = true; } catch {}
+
 // ── Alerts Basic Auth middleware ───────────────────────────────────────────────
 function alertsAuth(req, res, next) {
-  if (!ALERTS_PASS) return next();
   const auth = req.headers.authorization || '';
   if (auth.startsWith('Basic ')) {
-    const [u, p] = Buffer.from(auth.slice(6), 'base64').toString().split(':');
-    if (u === ALERTS_USER && p === ALERTS_PASS) return next();
+    const decoded = Buffer.from(auth.slice(6), 'base64').toString();
+    const colon = decoded.indexOf(':');
+    if (colon !== -1) {
+      const u = decoded.slice(0, colon);
+      const p = decoded.slice(colon + 1);
+      if (u === ALERTS_USER && p === ALERTS_PASS) return next();
+    }
   }
   res.setHeader('WWW-Authenticate', 'Basic realm="FlightHeat Alerts"');
   res.status(401).send('Authentication required');
 }
 
+// CORS — public read-only API only; alerts routes are excluded
+app.use((req, res, next) => {
+  if (!req.path.startsWith('/api/alerts')) {
+    res.setHeader('Access-Control-Allow-Origin', '*');
+  }
+  next();
+});
+
 // Static files — alerts.html gets its own auth gate
 app.use('/alerts.html', alertsAuth);
 app.use(express.static(path.join(__dirname, 'public')));
-app.use((req, res, next) => { res.setHeader('Access-Control-Allow-Origin', '*'); next(); });
 app.use('/api/alerts', alertsAuth);
 
-// ── Helpers ───────────────────────────────────────────────────────────────────
+// ── Input helpers ─────────────────────────────────────────────────────────────
+function safeInt(val, def, max) {
+  const n = parseInt(val, 10);
+  if (!Number.isFinite(n)) return def;
+  return Math.min(Math.max(n, 1), max);
+}
+
+function safeFloat(val) {
+  const n = parseFloat(val);
+  return Number.isFinite(n) ? n : null;
+}
+
+const ICAO_RE = /^[0-9a-f]{6}$/;
+
 function openSkyHeaders() {
   const h = {};
   if (OPENSKY_USER && OPENSKY_PASS)
@@ -44,6 +86,7 @@ function openSkyHeaders() {
   return h;
 }
 
+// ── Parsing + enrichment ──────────────────────────────────────────────────────
 function parseStates(states) {
   return (states || [])
     .map(s => ({
@@ -60,13 +103,23 @@ function parseStates(states) {
     .filter(f => f.lat !== null && f.lon !== null && !f.onGround);
 }
 
+// Batch lookup — one query for all ICAOs instead of N individual queries
 function enrichWithDb(flights) {
-  let hasTable = false;
-  try { db.prepare('SELECT 1 FROM aircraft_db LIMIT 1').get(); hasTable = true; } catch {}
-  if (!hasTable) return flights;
+  if (!aircraftDbAvailable || !flights.length) return flights;
+
+  const icaos = [...new Set(flights.map(f => f.icao.toLowerCase()).filter(Boolean))];
+  if (!icaos.length) return flights;
+
+  const placeholders = icaos.map(() => '?').join(',');
+  let rows;
+  try {
+    rows = db.prepare(`SELECT * FROM aircraft_db WHERE icao24 IN (${placeholders})`).all(icaos);
+  } catch { return flights; }
+
+  const byIcao = Object.fromEntries(rows.map(r => [r.icao24, r]));
 
   return flights.map(f => {
-    const info = lookupAircraft(db, f.icao);
+    const info = byIcao[f.icao.toLowerCase()];
     return {
       ...f,
       registration: info?.registration || null,
@@ -80,9 +133,13 @@ function enrichWithDb(flights) {
 
 // ── Live flights ──────────────────────────────────────────────────────────────
 app.get('/api/flights', async (req, res) => {
-  const { lamin, lamax, lomin, lomax } = req.query;
-  if (!lamin || !lamax || !lomin || !lomax)
-    return res.status(400).json({ error: 'Missing bbox parameters', flights: [] });
+  const lamin = safeFloat(req.query.lamin);
+  const lamax = safeFloat(req.query.lamax);
+  const lomin = safeFloat(req.query.lomin);
+  const lomax = safeFloat(req.query.lomax);
+
+  if (lamin === null || lamax === null || lomin === null || lomax === null)
+    return res.status(400).json({ error: 'Missing or invalid bbox parameters', flights: [] });
 
   const cacheKey = `${lamin},${lamax},${lomin},${lomax}`;
   const cached = flightCache.get(cacheKey);
@@ -93,8 +150,7 @@ app.get('/api/flights', async (req, res) => {
   try {
     const response = await fetch(url, { headers: openSkyHeaders(), timeout: 15000 });
     if (!response.ok) {
-      const errText = await response.text();
-      console.error(`OpenSky error ${response.status}: ${errText}`);
+      console.error(`OpenSky error ${response.status}`);
       return res.json({ flights: [], error: `OpenSky returned ${response.status}`, count: 0 });
     }
     const json = await response.json();
@@ -104,7 +160,7 @@ app.get('/api/flights', async (req, res) => {
     res.json(result);
   } catch (err) {
     console.error('Fetch error:', err.message);
-    res.json({ flights: [], error: `Błąd połączenia: ${err.message}`, count: 0 });
+    res.json({ flights: [], error: 'Błąd połączenia z OpenSky', count: 0 });
   }
 });
 
@@ -113,7 +169,12 @@ const PS_UA = 'FlightHeat/1.0 (+https://github.com/flightheat/flightheat)';
 
 app.get('/api/aircraft/:icao', async (req, res) => {
   const icao = req.params.icao.toLowerCase();
-  const info = lookupAircraft(db, icao);
+  if (!ICAO_RE.test(icao)) return res.status(400).json({ error: 'Invalid ICAO' });
+
+  let info = null;
+  if (aircraftDbAvailable) {
+    try { info = db.prepare('SELECT * FROM aircraft_db WHERE icao24 = ?').get(icao); } catch {}
+  }
 
   let photoUrl = null;
   const photoCached = photoCache.get(icao);
@@ -142,17 +203,19 @@ app.get('/api/aircraft/:icao', async (req, res) => {
 // ── Flight track ──────────────────────────────────────────────────────────────
 app.get('/api/flights/:icao/track', (req, res) => {
   const icao  = req.params.icao.toLowerCase();
-  const hours = Math.min(parseInt(req.query.hours) || 6, 48);
+  if (!ICAO_RE.test(icao)) return res.status(400).json({ error: 'Invalid ICAO' });
+
+  const hours = safeInt(req.query.hours, 6, 48);
 
   try {
     const rows = db.prepare(`
       SELECT lat, lon, alt, speed, heading, captured_at
       FROM flight_snapshots
       WHERE icao = ?
-        AND captured_at >= datetime('now', '-${hours} hours')
+        AND captured_at >= datetime('now', '-' || ? || ' hours')
       ORDER BY captured_at ASC
       LIMIT 300
-    `).all(icao);
+    `).all(icao, hours);
     res.json(rows);
   } catch (err) {
     console.error('track error:', err.message);
@@ -162,53 +225,74 @@ app.get('/api/flights/:icao/track', (req, res) => {
 
 // ── Historical heatmap ────────────────────────────────────────────────────────
 app.get('/api/history/heatmap', (req, res) => {
-  const hours = Math.min(parseInt(req.query.hours) || 24, 24 * 7);
-  const { lamin, lamax, lomin, lomax } = req.query;
+  const hours = safeInt(req.query.hours, 24, 24 * 7);
+  const lamin = safeFloat(req.query.lamin);
+  const lamax = safeFloat(req.query.lamax);
+  const lomin = safeFloat(req.query.lomin);
+  const lomax = safeFloat(req.query.lomax);
 
-  let sql = `
-    SELECT ROUND(lat,2) as lat, ROUND(lon,2) as lon,
-           COUNT(*) as count, AVG(alt) as avgAlt, AVG(speed) as avgSpeed
-    FROM flight_snapshots
-    WHERE captured_at >= datetime('now', '-${hours} hours')
-  `;
-  const params = [];
-  if (lamin && lamax && lomin && lomax) {
-    sql += ` AND lat BETWEEN ? AND ? AND lon BETWEEN ? AND ?`;
-    params.push(Number(lamin), Number(lamax), Number(lomin), Number(lomax));
+  const params = [hours];
+  let bboxClause = '';
+  if (lamin !== null && lamax !== null && lomin !== null && lomax !== null) {
+    bboxClause = 'AND lat BETWEEN ? AND ? AND lon BETWEEN ? AND ?';
+    params.push(lamin, lamax, lomin, lomax);
   }
-  sql += ` GROUP BY ROUND(lat,2), ROUND(lon,2)`;
 
-  try { res.json(db.prepare(sql).all(...params)); }
-  catch (err) { console.error('heatmap error:', err.message); res.json([]); }
+  try {
+    res.json(db.prepare(`
+      SELECT ROUND(lat,2) as lat, ROUND(lon,2) as lon,
+             COUNT(*) as count, AVG(alt) as avgAlt, AVG(speed) as avgSpeed
+      FROM flight_snapshots
+      WHERE captured_at >= datetime('now', '-' || ? || ' hours')
+      ${bboxClause}
+      GROUP BY ROUND(lat,2), ROUND(lon,2)
+    `).all(...params));
+  } catch (err) { console.error('heatmap error:', err.message); res.json([]); }
 });
 
 // ── Timeline ──────────────────────────────────────────────────────────────────
 app.get('/api/history/timeline', (req, res) => {
-  const hours    = Math.min(parseInt(req.query.hours) || 24, 24 * 7);
-  const interval = Math.max(parseInt(req.query.interval) || 60, 5);
+  const hours    = safeInt(req.query.hours, 24, 24 * 7);
+  const interval = safeInt(req.query.interval, 60, 24 * 60);
+
   try {
     res.json(db.prepare(`
       SELECT
         strftime('%Y-%m-%dT%H:', captured_at) ||
-        printf('%02d', (CAST(strftime('%M', captured_at) AS INT) / ${interval}) * ${interval}) AS time,
+        printf('%02d', (CAST(strftime('%M', captured_at) AS INT) / ?) * ?) AS time,
         COUNT(*) as count
       FROM flight_snapshots
-      WHERE captured_at >= datetime('now', '-${hours} hours')
+      WHERE captured_at >= datetime('now', '-' || ? || ' hours')
       GROUP BY time ORDER BY time ASC
-    `).all());
-  } catch (err) { res.json([]); }
+    `).all(interval, interval, hours));
+  } catch (err) { console.error('timeline error:', err.message); res.json([]); }
 });
 
 // ── Stats ─────────────────────────────────────────────────────────────────────
 app.get('/api/history/stats', (req, res) => {
-  const hours = Math.min(parseInt(req.query.hours) || 24, 24 * 7);
+  const hours = safeInt(req.query.hours, 24, 24 * 7);
+  const lamin = safeFloat(req.query.lamin);
+  const lamax = safeFloat(req.query.lamax);
+  const lomin = safeFloat(req.query.lomin);
+  const lomax = safeFloat(req.query.lomax);
+
+  const params = [hours];
+  let bboxClause = '';
+  if (lamin !== null && lamax !== null && lomin !== null && lomax !== null) {
+    bboxClause = 'AND lat BETWEEN ? AND ? AND lon BETWEEN ? AND ?';
+    params.push(lamin, lamax, lomin, lomax);
+  }
+
   try {
-    const base = `FROM flight_snapshots WHERE captured_at >= datetime('now', '-${hours} hours')`;
-    const agg  = db.prepare(`SELECT COUNT(*) as totalFlights, COUNT(DISTINCT icao) as uniqueAircraft, AVG(alt) as avgAlt, AVG(speed) as avgSpeed ${base}`).get();
-    const peakRow = db.prepare(`SELECT strftime('%Y-%m-%dT%H:00', captured_at) as time, COUNT(*) as count ${base} GROUP BY strftime('%Y-%m-%dT%H', captured_at) ORDER BY count DESC LIMIT 1`).get();
-    const topCountries = db.prepare(`SELECT country, COUNT(*) as count ${base} AND country != '' GROUP BY country ORDER BY count DESC LIMIT 5`).all();
+    const base = `FROM flight_snapshots WHERE captured_at >= datetime('now', '-' || ? || ' hours') ${bboxClause}`;
+    const agg = db.prepare(`SELECT COUNT(*) as totalFlights, COUNT(DISTINCT icao) as uniqueAircraft, AVG(alt) as avgAlt, AVG(speed) as avgSpeed ${base}`).get(...params);
+    const peakRow = db.prepare(`SELECT strftime('%Y-%m-%dT%H:00', captured_at) as time, COUNT(*) as count ${base} GROUP BY strftime('%Y-%m-%dT%H', captured_at) ORDER BY count DESC LIMIT 1`).get(...params);
+    const topCountries = db.prepare(`SELECT country, COUNT(*) as count ${base} AND country != '' GROUP BY country ORDER BY count DESC LIMIT 5`).all(...params);
     res.json({ totalFlights: agg.totalFlights, uniqueAircraft: agg.uniqueAircraft, avgAlt: Math.round(agg.avgAlt || 0), avgSpeed: Math.round(agg.avgSpeed || 0), peakHour: peakRow || null, topCountries });
-  } catch (err) { res.json({ totalFlights: 0, uniqueAircraft: 0, avgAlt: 0, avgSpeed: 0, peakHour: null, topCountries: [] }); }
+  } catch (err) {
+    console.error('stats error:', err.message);
+    res.json({ totalFlights: 0, uniqueAircraft: 0, avgAlt: 0, avgSpeed: 0, peakHour: null, topCountries: [] });
+  }
 });
 
 // ── Collector status ──────────────────────────────────────────────────────────
@@ -222,14 +306,15 @@ app.get('/api/alerts/rules', (req, res) =>
 
 app.post('/api/alerts/rules', express.json(), (req, res) => {
   const b = req.body || {};
-  if (!b.name) return res.status(400).json({ error: 'name is required' });
+  if (!b.name || typeof b.name !== 'string') return res.status(400).json({ error: 'name is required' });
   const cols = RULE_FIELDS.filter(f => f !== 'enabled' && b[f] !== undefined);
   const info = db.prepare(`INSERT INTO alert_rules (${cols.join(',')}) VALUES (${cols.map(() => '?').join(',')})`).run(cols.map(c => b[c] ?? null));
   res.status(201).json(db.prepare('SELECT * FROM alert_rules WHERE id = ?').get(info.lastInsertRowid));
 });
 
 app.patch('/api/alerts/rules/:id', express.json(), (req, res) => {
-  const id = parseInt(req.params.id);
+  const id = parseInt(req.params.id, 10);
+  if (!Number.isFinite(id)) return res.status(400).json({ error: 'Invalid id' });
   const b = req.body || {};
   const cols = RULE_FIELDS.filter(f => b[f] !== undefined);
   if (!cols.length) return res.status(400).json({ error: 'No fields to update' });
@@ -240,7 +325,8 @@ app.patch('/api/alerts/rules/:id', express.json(), (req, res) => {
 });
 
 app.delete('/api/alerts/rules/:id', (req, res) => {
-  const id = parseInt(req.params.id);
+  const id = parseInt(req.params.id, 10);
+  if (!Number.isFinite(id)) return res.status(400).json({ error: 'Invalid id' });
   db.prepare('DELETE FROM alert_events WHERE rule_id = ?').run(id);
   db.prepare('DELETE FROM alert_rules WHERE id = ?').run(id);
   res.json({ ok: true });
@@ -260,14 +346,16 @@ app.get('/api/alerts/pending', (req, res) => {
 });
 
 app.get('/api/alerts/events', (req, res) => {
-  const hours = Math.min(parseInt(req.query.hours) || 24, 24 * 7);
-  const limit = Math.min(parseInt(req.query.limit) || 100, 500);
-  res.json(db.prepare(`
-    SELECT e.*, r.name as rule_name FROM alert_events e
-    LEFT JOIN alert_rules r ON r.id = e.rule_id
-    WHERE e.triggered_at >= datetime('now', '-${hours} hours')
-    ORDER BY e.triggered_at DESC LIMIT ${limit}
-  `).all());
+  const hours = safeInt(req.query.hours, 24, 24 * 7);
+  const limit = safeInt(req.query.limit, 100, 500);
+  try {
+    res.json(db.prepare(`
+      SELECT e.*, r.name as rule_name FROM alert_events e
+      LEFT JOIN alert_rules r ON r.id = e.rule_id
+      WHERE e.triggered_at >= datetime('now', '-' || ? || ' hours')
+      ORDER BY e.triggered_at DESC LIMIT ?
+    `).all(hours, limit));
+  } catch (err) { console.error('events error:', err.message); res.json([]); }
 });
 
 app.get('/api/alerts/stats', (req, res) => {

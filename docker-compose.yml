@@ -9,6 +9,6 @@ services:
     environment:
       - OPENSKY_USER=
       - OPENSKY_PASS=
-      - COLLECT_BBOX=49,55,14,24.5
+      - COLLECT_BBOX=34,72,-12,42
       - DB_PATH=/app/data/flightheat.db
     restart: unless-stopped

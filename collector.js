@@ -4,7 +4,7 @@ const { runAlertCheck } = require('./alerts');
 
 const OPENSKY_USER = process.env.OPENSKY_USER || '';
 const OPENSKY_PASS = process.env.OPENSKY_PASS || '';
-const COLLECT_BBOX = process.env.COLLECT_BBOX || '49,55,14,24.5';
+const COLLECT_BBOX = process.env.COLLECT_BBOX || '34,72,-12,42';
 
 let lastRun = null;
 let lastCount = 0;

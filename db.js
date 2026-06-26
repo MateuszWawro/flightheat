@@ -25,7 +25,10 @@ db.exec(`
     country     TEXT
   );
   CREATE INDEX IF NOT EXISTS idx_captured_at ON flight_snapshots(captured_at);
-  CREATE INDEX IF NOT EXISTS idx_icao ON flight_snapshots(icao);
+  CREATE INDEX IF NOT EXISTS idx_icao        ON flight_snapshots(icao);
+  CREATE INDEX IF NOT EXISTS idx_time_pos    ON flight_snapshots(captured_at, lat, lon);
+  CREATE INDEX IF NOT EXISTS idx_alert_events_dedup
+    ON alert_events(rule_id, icao, triggered_at);
 
   CREATE TABLE IF NOT EXISTS collection_log (
     id           INTEGER PRIMARY KEY AUTOINCREMENT,

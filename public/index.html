@@ -595,6 +595,115 @@
   }
 
   .aheat-btn.active { border-color: var(--cyan); color: var(--cyan); }
+
+  /* ── Analytics region selector ───────────────────────────────── */
+  .aregion-btns { display: flex; gap: 4px; flex-wrap: wrap; }
+
+  .aregion-btn {
+    background: transparent;
+    border: 1px solid var(--border);
+    color: var(--text-dim);
+    padding: 4px 11px;
+    font-family: inherit;
+    font-size: 0.75rem;
+    cursor: pointer;
+    border-radius: 3px;
+    transition: all 0.15s;
+  }
+  .aregion-btn.active { border-color: var(--cyan); color: var(--cyan); background: rgba(79,195,247,0.08); }
+  .aregion-btn:hover:not(.active) { border-color: var(--cyan-dim); color: var(--text); }
+
+  /* ── Analytics time slider row ───────────────────────────────── */
+  .analytics-toolbar-time {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    flex-wrap: wrap;
+  }
+
+  .slider-label {
+    font-size: 0.75rem;
+    color: var(--text-dim);
+    white-space: nowrap;
+  }
+
+  .slider-val {
+    font-size: 0.78rem;
+    color: var(--cyan);
+    min-width: 38px;
+    font-family: monospace;
+  }
+
+  .a-slider {
+    -webkit-appearance: none;
+    appearance: none;
+    height: 4px;
+    border-radius: 2px;
+    background: var(--border);
+    cursor: pointer;
+    outline: none;
+  }
+
+  #time-slider { width: 160px; }
+
+  .a-slider::-webkit-slider-thumb {
+    -webkit-appearance: none;
+    width: 14px; height: 14px;
+    border-radius: 50%;
+    background: var(--cyan);
+    cursor: pointer;
+    border: 2px solid var(--bg);
+  }
+
+  .a-slider::-moz-range-thumb {
+    width: 14px; height: 14px;
+    border-radius: 50%;
+    background: var(--cyan);
+    cursor: pointer;
+    border: 2px solid var(--bg);
+  }
+
+  /* ── Heatmap controls (type btns + legend + radius) ─────────── */
+  .aheat-controls {
+    display: flex;
+    align-items: center;
+    gap: 16px;
+    margin-bottom: 10px;
+    flex-wrap: wrap;
+  }
+
+  /* ── Color legend ────────────────────────────────────────────── */
+  .a-legend {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    flex: 1;
+    min-width: 160px;
+    max-width: 280px;
+  }
+
+  .a-legend-bar {
+    flex: 1;
+    height: 10px;
+    border-radius: 5px;
+    background: linear-gradient(to right, #00bcd4, #ff9800, #f44336);
+    border: 1px solid rgba(255,255,255,0.06);
+  }
+
+  .a-legend-label {
+    font-size: 0.68rem;
+    color: var(--text-dim);
+    white-space: nowrap;
+  }
+
+  /* ── Radius slider row ───────────────────────────────────────── */
+  .a-slider-row {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+  }
+
+  #a-radius { width: 80px; }
 </style>
 </head>
 <body>
@@ -702,18 +811,28 @@
 
 <!-- ANALYTICS PANEL -->
 <div id="analytics-panel">
-  <!-- Toolbar -->
+
+  <!-- Toolbar row 1: region + collector -->
   <div class="analytics-toolbar">
-    <div class="time-pills">
-      <button class="time-pill" data-hours="1">1h</button>
-      <button class="time-pill active" data-hours="24">24h</button>
-      <button class="time-pill" data-hours="168">7d</button>
+    <div class="aregion-btns">
+      <button class="aregion-btn active" data-region="polska">🇵🇱 Polska</button>
+      <button class="aregion-btn" data-region="europe">🌍 Europa</button>
+      <button class="aregion-btn" data-region="centraleurope">Europa Środkowa</button>
+      <button class="aregion-btn" data-region="trojmiasto">Trójmiasto</button>
+      <button class="aregion-btn" data-region="elblag">Elbląg</button>
     </div>
-    <span class="analytics-status" id="analytics-status">Wybierz zakres czasu</span>
     <div class="collector-badge">
       <div class="collector-dot inactive" id="collector-dot"></div>
       <span id="collector-label">Sprawdzanie…</span>
     </div>
+  </div>
+
+  <!-- Toolbar row 2: time slider + status + refresh -->
+  <div class="analytics-toolbar analytics-toolbar-time">
+    <span class="slider-label">Zakres:</span>
+    <input type="range" id="time-slider" min="1" max="168" value="24" class="a-slider">
+    <span id="time-slider-val" class="slider-val">24h</span>
+    <span class="analytics-status" id="analytics-status">Wybierz region i zakres czasu</span>
     <button id="analytics-refresh">Odśwież</button>
   </div>
 
@@ -752,15 +871,30 @@
   <!-- Historical heatmap + countries -->
   <div class="analytics-section">
     <h3>Mapa historyczna</h3>
+
+    <!-- Heatmap controls: type + legend + radius -->
+    <div class="aheat-controls">
+      <div class="aheat-btns">
+        <button class="aheat-btn active" data-type="density">Gęstość</button>
+        <button class="aheat-btn" data-type="altitude">Wysokość</button>
+        <button class="aheat-btn" data-type="speed">Prędkość</button>
+      </div>
+      <div class="a-legend">
+        <span id="a-legend-min" class="a-legend-label">Rzadkie</span>
+        <div id="a-legend-bar" class="a-legend-bar"></div>
+        <span id="a-legend-max" class="a-legend-label">Gęste</span>
+      </div>
+      <div class="a-slider-row">
+        <span class="slider-label">Promień</span>
+        <input type="range" id="a-radius" min="5" max="50" value="20" class="a-slider">
+        <span id="a-radius-val" class="slider-val">20px</span>
+      </div>
+    </div>
+
     <div class="analytics-map-row">
       <div style="position:relative;">
-        <div class="aheat-btns">
-          <button class="aheat-btn active" data-type="density">Gęstość</button>
-          <button class="aheat-btn" data-type="altitude">Wysokość</button>
-          <button class="aheat-btn" data-type="speed">Prędkość</button>
-        </div>
         <div id="analytics-map">
-          <div class="historical-label" id="historical-label">Dane historyczne — ostatnie 24h</div>
+          <div class="historical-label" id="historical-label">Polska · ostatnie 24h</div>
         </div>
       </div>
       <div>
@@ -909,22 +1043,19 @@ function renderAll() {
 }
 
 function renderHeatmaps() {
-  // Remove all existing heat layers
   Object.values(heatLayers).forEach(l => { if (l) map.removeLayer(l); });
 
   if (flightsData.length === 0) return;
 
-  const points = {
-    density: flightsData.map(f => [f.lat, f.lon, 1.0]),
-    altitude: flightsData.map(f => [f.lat, f.lon, Math.min(f.alt / 13000, 1.0)]),
-    speed:    flightsData.map(f => [f.lat, f.lon, Math.min(f.speed / 1000, 1.0)])
+  // Only build the active layer — skip computing the other two
+  const pointBuilders = {
+    density:  f => [f.lat, f.lon, 1.0],
+    altitude: f => [f.lat, f.lon, Math.min(f.alt / 13000, 1.0)],
+    speed:    f => [f.lat, f.lon, Math.min(f.speed / 1000, 1.0)]
   };
 
-  Object.keys(heatLayers).forEach(key => {
-    heatLayers[key] = L.heatLayer(points[key], HEAT_CONFIGS[key]);
-  });
-
-  heatLayers[activeLayer].addTo(map);
+  const pts = flightsData.map(pointBuilders[activeLayer]);
+  heatLayers[activeLayer] = L.heatLayer(pts, HEAT_CONFIGS[activeLayer]).addTo(map);
 }
 
 // ── Plane icon colour by altitude ─────────────────────────────────────────────
@@ -983,7 +1114,12 @@ map.on('popupopen', async (e) => {
       const res = await fetch(`/api/aircraft/${icao}`);
       const data = await res.json();
       if (data.photoUrl) {
-        wrap.innerHTML = `<img src="${data.photoUrl}" alt="Zdjęcie ${icao}" onerror="this.parentElement.remove()">`;
+        const img = document.createElement('img');
+        img.src = data.photoUrl;
+        img.alt = `Zdjęcie ${icao}`;
+        img.onerror = () => wrap.remove();
+        wrap.innerHTML = '';
+        wrap.appendChild(img);
       } else {
         wrap.remove();
       }
