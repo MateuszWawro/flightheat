@@ -605,17 +605,13 @@
 
   <div class="tab-nav">
     <button class="tab-nav-btn active" data-tab="live">Mapa live</button>
+    <button class="tab-nav-btn" data-tab="heatmap">Heatmapa</button>
     <button class="tab-nav-btn" data-tab="analytics">Analityka</button>
     <a class="tab-nav-btn alerts-link" href="/alerts.html" title="Zarządzaj alertami">Alerty <span id="alert-badge" style="display:none"></span></a>
   </div>
 
+  <!-- live map controls -->
   <div id="live-controls" style="display:flex;align-items:center;gap:16px;flex:1;">
-    <div class="layer-btns">
-      <button class="layer-btn active" data-layer="density">Gęstość</button>
-      <button class="layer-btn" data-layer="altitude">Wysokość</button>
-      <button class="layer-btn" data-layer="speed">Prędkość</button>
-    </div>
-
     <div id="status">Brak danych — kliknij "Pobierz dane"</div>
 
     <div class="topbar-actions">
@@ -632,6 +628,16 @@
         <span id="btn-label">Pobierz dane</span>
       </button>
     </div>
+  </div>
+
+  <!-- heatmap controls (hidden by default) -->
+  <div id="heatmap-controls" style="display:none;align-items:center;gap:16px;flex:1;">
+    <div class="layer-btns">
+      <button class="layer-btn active" data-layer="density">Gęstość</button>
+      <button class="layer-btn" data-layer="altitude">Wysokość</button>
+      <button class="layer-btn" data-layer="speed">Prędkość</button>
+    </div>
+    <div id="heatmap-status" style="color:var(--text-dim);font-size:13px;">Dane z aktualnego widoku</div>
   </div>
 </div>
 
@@ -843,7 +849,7 @@ document.querySelectorAll('.preset-btn').forEach(btn => {
   });
 });
 
-// ── Layer toggle ─────────────────────────────────────────────────────────────
+// ── Layer toggle (heatmap tab) ────────────────────────────────────────────────
 document.querySelectorAll('.layer-btn').forEach(btn => {
   btn.addEventListener('click', () => {
     document.querySelectorAll('.layer-btn').forEach(b => b.classList.remove('active'));
@@ -896,8 +902,10 @@ async function fetchFlights() {
 // ── Render ───────────────────────────────────────────────────────────────────
 function renderAll() {
   updateStats();
-  renderHeatmaps();
   renderMarkers();
+  // heatmap is only shown when heatmap tab is active
+  if (activeTab === 'heatmap') renderHeatmaps();
+  else { Object.values(heatLayers).forEach(l => { if (l) map.removeLayer(l); }); }
 }
 
 function renderHeatmaps() {
@@ -1174,27 +1182,46 @@ pollAlertBadge();
 setInterval(pollAlertBadge, 60000);
 
 // ── Tab switching ─────────────────────────────────────────────────────────────
-const liveMain      = document.getElementById('main');
-const analyticsPanel= document.getElementById('analytics-panel');
-const liveControls  = document.getElementById('live-controls');
+const liveMain        = document.getElementById('main');
+const analyticsPanel  = document.getElementById('analytics-panel');
+const liveControls    = document.getElementById('live-controls');
+const heatmapControls = document.getElementById('heatmap-controls');
+
+let activeTab = 'live';
 
 document.querySelectorAll('.tab-nav-btn').forEach(btn => {
   btn.addEventListener('click', () => {
+    if (!btn.dataset.tab) return; // alerts link — no tab
     document.querySelectorAll('.tab-nav-btn').forEach(b => b.classList.remove('active'));
     btn.classList.add('active');
+    activeTab = btn.dataset.tab;
 
-    if (btn.dataset.tab === 'analytics') {
+    if (activeTab === 'analytics') {
       liveMain.style.display = 'none';
       liveControls.style.display = 'none';
+      heatmapControls.style.display = 'none';
       analyticsPanel.classList.add('visible');
       Analytics.init();
       Analytics.wire();
       Analytics.load();
+    } else if (activeTab === 'heatmap') {
+      analyticsPanel.classList.remove('visible');
+      liveControls.style.display = 'none';
+      liveMain.style.display = 'flex';
+      heatmapControls.style.display = 'flex';
+      // hide individual markers, show heatmap
+      markersGroup.clearLayers();
+      markersRef.clear();
+      renderHeatmaps();
+      setTimeout(() => map.invalidateSize(), 50);
     } else {
+      analyticsPanel.classList.remove('visible');
+      heatmapControls.style.display = 'none';
       liveMain.style.display = 'flex';
       liveControls.style.display = 'flex';
-      analyticsPanel.classList.remove('visible');
-      // Invalidate map size after re-show
+      // remove heatmap layers, re-render markers
+      Object.values(heatLayers).forEach(l => { if (l) map.removeLayer(l); });
+      renderMarkers();
       setTimeout(() => map.invalidateSize(), 50);
     }
   });

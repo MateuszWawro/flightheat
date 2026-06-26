@@ -10,7 +10,7 @@ const PORT = process.env.PORT || 3000;
 const OPENSKY_USER = process.env.OPENSKY_USER || '';
 const OPENSKY_PASS = process.env.OPENSKY_PASS || '';
 const ALERTS_USER  = process.env.ALERTS_USER  || 'admin';
-const ALERTS_PASS  = process.env.ALERTS_PASS  || '';
+const ALERTS_PASS  = process.env.ALERTS_PASS  || 'admin';
 
 // Caches
 const flightCache = new Map();

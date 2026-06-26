@@ -33,7 +33,9 @@
       "Bash(curl -s \"http://localhost:3000/api/aircraft/48e9e6\")",
       "Bash(sqlite3 /Users/mateusz/flight-heat-map/data/flightheat.db \"SELECT * FROM aircraft_db WHERE icao24='502ce3';\")",
       "Bash(sqlite3 /Users/mateusz/flight-heat-map/data/flightheat.db \"SELECT COUNT\\(*\\) FROM aircraft_db WHERE icao24 LIKE '502%';\")",
-      "Bash(curl -s \"http://localhost:3000/api/aircraft/502ce3\")"
+      "Bash(curl -s \"http://localhost:3000/api/aircraft/502ce3\")",
+      "Bash(curl -s -o /dev/null -w \"%{http_code}\" http://localhost:3000/alerts.html)",
+      "Bash(curl -s -o /dev/null -w \"%{http_code}\" -u admin:admin http://localhost:3000/alerts.html)"
     ]
   }
 }
