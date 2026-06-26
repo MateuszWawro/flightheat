@@ -1,0 +1,15 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(npm install *)",
+      "mcp__Claude_Preview__preview_start",
+      "Bash(pkill -f \"node server.js\")",
+      "Bash(node /Users/mateusz/flight-heat-map/server.js)",
+      "Bash(curl -s http://localhost:3000/api/collector/status)",
+      "Bash(curl -s \"http://localhost:3000/api/history/stats?hours=24\")",
+      "Bash(node -e \"const d=require\\('fs'\\).readFileSync\\('/dev/stdin','utf8'\\); const j=JSON.parse\\(d\\); console.log\\(JSON.stringify\\(j,null,2\\)\\)\")",
+      "Bash(pkill -f \"node /Users/mateusz/flight-heat-map/server.js\")",
+      "Bash(python3 -m json.tool)"
+    ]
+  }
+}

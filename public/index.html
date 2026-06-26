@@ -1,0 +1,1159 @@
+<!DOCTYPE html>
+<html lang="pl">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>FlightHeat — Mapa lotów</title>
+<link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css">
+<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+<script src="https://unpkg.com/leaflet.heat/dist/leaflet-heat.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4/dist/chart.umd.min.js"></script>
+<style>
+  *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+  :root {
+    --bg: #0a0e1a;
+    --surface: #111827;
+    --border: #1e2d45;
+    --cyan: #4fc3f7;
+    --cyan-dim: #1a6b8a;
+    --text: #cdd6f4;
+    --text-dim: #6b7a99;
+    --red: #f44336;
+    --sidebar: 220px;
+  }
+
+  body {
+    font-family: 'Courier New', Courier, monospace;
+    background: var(--bg);
+    color: var(--text);
+    height: 100vh;
+    display: flex;
+    flex-direction: column;
+    overflow: hidden;
+  }
+
+  /* TOP BAR */
+  #topbar {
+    background: var(--surface);
+    border-bottom: 1px solid var(--border);
+    padding: 0 16px;
+    height: 52px;
+    display: flex;
+    align-items: center;
+    gap: 16px;
+    flex-shrink: 0;
+    z-index: 1000;
+  }
+
+  #logo {
+    font-size: 1.2rem;
+    font-weight: bold;
+    color: var(--cyan);
+    letter-spacing: 2px;
+    white-space: nowrap;
+  }
+
+  #logo span { color: var(--text-dim); font-size: 0.75rem; margin-left: 6px; }
+
+  .layer-btns {
+    display: flex;
+    gap: 6px;
+    flex-shrink: 0;
+  }
+
+  .layer-btn {
+    background: transparent;
+    border: 1px solid var(--border);
+    color: var(--text-dim);
+    padding: 5px 12px;
+    font-family: inherit;
+    font-size: 0.78rem;
+    cursor: pointer;
+    border-radius: 3px;
+    transition: all 0.15s;
+    white-space: nowrap;
+  }
+
+  .layer-btn:hover { border-color: var(--cyan-dim); color: var(--text); }
+  .layer-btn.active { border-color: var(--cyan); color: var(--cyan); background: rgba(79,195,247,0.08); }
+
+  #status {
+    flex: 1;
+    font-size: 0.78rem;
+    color: var(--text-dim);
+    text-align: center;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+
+  #status.error { color: var(--red); }
+
+  .topbar-actions {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    flex-shrink: 0;
+  }
+
+  #fetch-btn {
+    background: var(--cyan);
+    border: none;
+    color: #000;
+    padding: 6px 16px;
+    font-family: inherit;
+    font-size: 0.82rem;
+    font-weight: bold;
+    cursor: pointer;
+    border-radius: 3px;
+    transition: opacity 0.15s;
+    white-space: nowrap;
+    display: flex;
+    align-items: center;
+    gap: 6px;
+  }
+
+  #fetch-btn:hover { opacity: 0.85; }
+  #fetch-btn:disabled { opacity: 0.5; cursor: not-allowed; }
+
+  .spinner {
+    width: 12px; height: 12px;
+    border: 2px solid rgba(0,0,0,0.3);
+    border-top-color: #000;
+    border-radius: 50%;
+    animation: spin 0.6s linear infinite;
+    display: none;
+  }
+
+  #fetch-btn.loading .spinner { display: block; }
+  #fetch-btn.loading #btn-label { display: none; }
+
+  @keyframes spin { to { transform: rotate(360deg); } }
+
+  #auto-toggle {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    font-size: 0.78rem;
+    color: var(--text-dim);
+    cursor: pointer;
+    user-select: none;
+    white-space: nowrap;
+  }
+
+  #auto-toggle input[type=checkbox] { accent-color: var(--cyan); width: 14px; height: 14px; cursor: pointer; }
+  #countdown { color: var(--cyan); font-size: 0.72rem; }
+
+  /* MAIN LAYOUT */
+  #main {
+    display: flex;
+    flex: 1;
+    overflow: hidden;
+  }
+
+  /* SIDEBAR */
+  #sidebar {
+    width: var(--sidebar);
+    background: var(--surface);
+    border-right: 1px solid var(--border);
+    display: flex;
+    flex-direction: column;
+    padding: 12px;
+    gap: 16px;
+    overflow-y: auto;
+    flex-shrink: 0;
+    z-index: 500;
+  }
+
+  .sidebar-section h3 {
+    font-size: 0.65rem;
+    letter-spacing: 1.5px;
+    color: var(--text-dim);
+    text-transform: uppercase;
+    margin-bottom: 8px;
+    border-bottom: 1px solid var(--border);
+    padding-bottom: 4px;
+  }
+
+  .preset-btn {
+    display: block;
+    width: 100%;
+    background: transparent;
+    border: 1px solid var(--border);
+    color: var(--text);
+    padding: 6px 10px;
+    font-family: inherit;
+    font-size: 0.78rem;
+    cursor: pointer;
+    border-radius: 3px;
+    text-align: left;
+    margin-bottom: 5px;
+    transition: all 0.15s;
+  }
+
+  .preset-btn:hover { border-color: var(--cyan-dim); color: var(--cyan); }
+
+  .bbox-grid {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 6px;
+  }
+
+  .bbox-field label {
+    display: block;
+    font-size: 0.65rem;
+    color: var(--text-dim);
+    margin-bottom: 3px;
+    letter-spacing: 0.5px;
+  }
+
+  .bbox-field input {
+    width: 100%;
+    background: var(--bg);
+    border: 1px solid var(--border);
+    color: var(--text);
+    padding: 5px 6px;
+    font-family: inherit;
+    font-size: 0.78rem;
+    border-radius: 3px;
+    outline: none;
+  }
+
+  .bbox-field input:focus { border-color: var(--cyan-dim); }
+
+  /* STATS */
+  .stat-row {
+    display: flex;
+    justify-content: space-between;
+    font-size: 0.78rem;
+    padding: 4px 0;
+    border-bottom: 1px solid var(--border);
+  }
+
+  .stat-row:last-child { border-bottom: none; }
+  .stat-label { color: var(--text-dim); }
+  .stat-value { color: var(--cyan); font-weight: bold; }
+
+  /* MAP */
+  #map {
+    flex: 1;
+    z-index: 1;
+  }
+
+  /* PLANE MARKER */
+  .plane-icon {
+    font-size: 16px;
+    line-height: 1;
+    color: var(--cyan);
+    text-shadow: 0 0 6px rgba(79,195,247,0.8);
+    cursor: pointer;
+    transform-origin: center;
+  }
+
+  /* POPUP */
+  .leaflet-popup-content-wrapper {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 4px;
+    color: var(--text);
+    font-family: 'Courier New', Courier, monospace;
+    font-size: 0.78rem;
+  }
+
+  .leaflet-popup-tip { background: var(--surface); }
+  .leaflet-popup-close-button { color: var(--text-dim) !important; }
+
+  .popup-title {
+    font-size: 0.88rem;
+    font-weight: bold;
+    color: var(--cyan);
+    margin-bottom: 2px;
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    flex-wrap: wrap;
+  }
+
+  .popup-reg {
+    color: var(--text-dim);
+    font-size: 0.78rem;
+    font-weight: normal;
+  }
+
+  .popup-model {
+    font-size: 0.82rem;
+    color: var(--text);
+    margin-bottom: 2px;
+  }
+
+  .popup-operator {
+    font-size: 0.75rem;
+    color: var(--text-dim);
+    margin-bottom: 8px;
+    font-style: italic;
+  }
+
+  .popup-divider {
+    border: none;
+    border-top: 1px solid var(--border);
+    margin: 6px 0;
+  }
+
+  .popup-row { display: flex; justify-content: space-between; gap: 12px; padding: 2px 0; }
+  .popup-key { color: var(--text-dim); }
+  .popup-val { color: var(--text); }
+
+  .popup-photo-wrap {
+    margin-top: 8px;
+    min-height: 20px;
+  }
+
+  .popup-photo-wrap img {
+    width: 100%;
+    border-radius: 3px;
+    display: block;
+    margin-top: 4px;
+  }
+
+  .popup-photo-loading {
+    font-size: 0.72rem;
+    color: var(--text-dim);
+  }
+
+  /* ── Search bar ─────────────────────────────────────────────── */
+  #search-wrap {
+    position: relative;
+    flex-shrink: 0;
+  }
+
+  #search-input {
+    background: var(--bg);
+    border: 1px solid var(--border);
+    color: var(--text);
+    padding: 5px 10px;
+    font-family: inherit;
+    font-size: 0.78rem;
+    border-radius: 3px;
+    width: 180px;
+    outline: none;
+    transition: border-color 0.15s;
+  }
+
+  #search-input:focus { border-color: var(--cyan-dim); }
+  #search-input::placeholder { color: var(--text-dim); }
+
+  #search-msg {
+    position: absolute;
+    top: calc(100% + 4px);
+    left: 0;
+    background: var(--surface);
+    border: 1px solid var(--border);
+    padding: 4px 10px;
+    font-size: 0.72rem;
+    color: var(--red);
+    border-radius: 3px;
+    white-space: nowrap;
+    z-index: 2000;
+    display: none;
+  }
+
+  /* Responsive */
+  @media (max-width: 860px) {
+    :root { --sidebar: 180px; }
+    #logo span { display: none; }
+  }
+
+  @media (max-width: 768px) {
+    #sidebar { display: none; }
+    #topbar { gap: 8px; padding: 0 10px; }
+    .layer-btn { padding: 4px 8px; font-size: 0.72rem; }
+  }
+
+  /* ── Tab nav ─────────────────────────────────────────────────── */
+  .tab-nav {
+    display: flex;
+    gap: 2px;
+    background: var(--bg);
+    border-radius: 4px;
+    padding: 2px;
+    flex-shrink: 0;
+  }
+
+  .tab-nav-btn {
+    background: transparent;
+    border: none;
+    color: var(--text-dim);
+    padding: 4px 14px;
+    font-family: inherit;
+    font-size: 0.78rem;
+    cursor: pointer;
+    border-radius: 3px;
+    transition: all 0.15s;
+    white-space: nowrap;
+  }
+
+  .tab-nav-btn.active { background: var(--surface); color: var(--cyan); }
+  .tab-nav-btn:hover:not(.active) { color: var(--text); }
+  .alerts-link { text-decoration: none; }
+
+  #alert-badge {
+    display: inline-block;
+    background: #f44336;
+    color: #fff;
+    border-radius: 8px;
+    padding: 0 5px;
+    font-size: 0.65rem;
+    vertical-align: middle;
+    margin-left: 3px;
+    line-height: 1.6;
+  }
+
+  /* ── Analytics panel ─────────────────────────────────────────── */
+  #analytics-panel {
+    display: none;
+    flex: 1;
+    flex-direction: column;
+    overflow-y: auto;
+    background: var(--bg);
+    padding: 16px;
+    gap: 16px;
+  }
+
+  #analytics-panel.visible { display: flex; }
+
+  .analytics-toolbar {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    flex-wrap: wrap;
+  }
+
+  .time-pills { display: flex; gap: 4px; }
+
+  .time-pill {
+    background: transparent;
+    border: 1px solid var(--border);
+    color: var(--text-dim);
+    padding: 4px 12px;
+    font-family: inherit;
+    font-size: 0.78rem;
+    cursor: pointer;
+    border-radius: 3px;
+    transition: all 0.15s;
+  }
+
+  .time-pill.active { border-color: var(--cyan); color: var(--cyan); background: rgba(79,195,247,0.08); }
+  .time-pill:hover:not(.active) { border-color: var(--cyan-dim); color: var(--text); }
+
+  .collector-badge {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    font-size: 0.75rem;
+    color: var(--text-dim);
+    margin-left: auto;
+  }
+
+  .collector-dot {
+    width: 8px; height: 8px;
+    border-radius: 50%;
+    flex-shrink: 0;
+  }
+
+  .collector-dot.active { background: #4caf50; box-shadow: 0 0 6px #4caf50; }
+  .collector-dot.inactive { background: var(--text-dim); }
+
+  .analytics-status {
+    font-size: 0.75rem;
+    color: var(--text-dim);
+  }
+
+  .analytics-status.error { color: var(--red); }
+
+  #analytics-refresh {
+    background: transparent;
+    border: 1px solid var(--border);
+    color: var(--text-dim);
+    padding: 4px 12px;
+    font-family: inherit;
+    font-size: 0.78rem;
+    cursor: pointer;
+    border-radius: 3px;
+    transition: all 0.15s;
+  }
+
+  #analytics-refresh:hover { border-color: var(--cyan-dim); color: var(--text); }
+
+  /* ── Stats cards ─────────────────────────────────────────────── */
+  .stats-cards {
+    display: grid;
+    grid-template-columns: repeat(4, 1fr);
+    gap: 12px;
+  }
+
+  @media (max-width: 900px) { .stats-cards { grid-template-columns: repeat(2, 1fr); } }
+
+  .stat-card {
+    background: #0d1525;
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    padding: 14px 16px;
+  }
+
+  .stat-card-label {
+    font-size: 0.65rem;
+    letter-spacing: 1.2px;
+    text-transform: uppercase;
+    color: var(--text-dim);
+    margin-bottom: 8px;
+  }
+
+  .stat-card-value {
+    font-size: 1.5rem;
+    color: var(--cyan);
+    font-weight: bold;
+    line-height: 1;
+  }
+
+  .stat-card-sub {
+    font-size: 0.7rem;
+    color: var(--text-dim);
+    margin-top: 4px;
+  }
+
+  /* ── Charts ──────────────────────────────────────────────────── */
+  .analytics-section {
+    background: #0d1525;
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    padding: 16px;
+  }
+
+  .analytics-section h3 {
+    font-size: 0.72rem;
+    letter-spacing: 1.5px;
+    text-transform: uppercase;
+    color: var(--text-dim);
+    margin-bottom: 14px;
+  }
+
+  .chart-wrap {
+    position: relative;
+    height: 200px;
+  }
+
+  .chart-wrap.tall { height: 160px; }
+
+  /* ── Analytics map ───────────────────────────────────────────── */
+  .analytics-map-row {
+    display: grid;
+    grid-template-columns: 1fr 260px;
+    gap: 12px;
+    align-items: start;
+  }
+
+  @media (max-width: 900px) { .analytics-map-row { grid-template-columns: 1fr; } }
+
+  #analytics-map {
+    height: 340px;
+    border-radius: 4px;
+    overflow: hidden;
+    border: 1px solid var(--border);
+    position: relative;
+  }
+
+  .historical-label {
+    position: absolute;
+    bottom: 8px;
+    left: 8px;
+    z-index: 1000;
+    background: rgba(10,14,26,0.8);
+    color: var(--text-dim);
+    font-size: 0.68rem;
+    padding: 3px 8px;
+    border-radius: 3px;
+    pointer-events: none;
+  }
+
+  .aheat-btns {
+    display: flex;
+    gap: 4px;
+    margin-bottom: 10px;
+  }
+
+  .aheat-btn {
+    background: transparent;
+    border: 1px solid var(--border);
+    color: var(--text-dim);
+    padding: 3px 10px;
+    font-family: inherit;
+    font-size: 0.72rem;
+    cursor: pointer;
+    border-radius: 3px;
+    transition: all 0.15s;
+  }
+
+  .aheat-btn.active { border-color: var(--cyan); color: var(--cyan); }
+</style>
+</head>
+<body>
+
+<!-- TOP BAR -->
+<div id="topbar">
+  <div id="logo">✈ FLIGHTHEAT<span>live</span></div>
+
+  <div class="tab-nav">
+    <button class="tab-nav-btn active" data-tab="live">Mapa live</button>
+    <button class="tab-nav-btn" data-tab="analytics">Analityka</button>
+    <a class="tab-nav-btn alerts-link" href="/alerts.html" title="Zarządzaj alertami">Alerty <span id="alert-badge" style="display:none"></span></a>
+  </div>
+
+  <div id="live-controls" style="display:flex;align-items:center;gap:16px;flex:1;">
+    <div class="layer-btns">
+      <button class="layer-btn active" data-layer="density">Gęstość</button>
+      <button class="layer-btn" data-layer="altitude">Wysokość</button>
+      <button class="layer-btn" data-layer="speed">Prędkość</button>
+    </div>
+
+    <div id="status">Brak danych — kliknij "Pobierz dane"</div>
+
+    <div class="topbar-actions">
+      <div id="search-wrap">
+        <input id="search-input" type="text" placeholder="Szukaj ICAO / callsign" autocomplete="off">
+        <div id="search-msg"></div>
+      </div>
+      <label id="auto-toggle" title="Automatyczne odświeżanie co 30s">
+        <input type="checkbox" id="auto-refresh">
+        Auto <span id="countdown"></span>
+      </label>
+      <button id="fetch-btn" title="Pobierz dane z OpenSky">
+        <div class="spinner"></div>
+        <span id="btn-label">Pobierz dane</span>
+      </button>
+    </div>
+  </div>
+</div>
+
+<!-- MAIN -->
+<div id="main">
+  <!-- SIDEBAR -->
+  <div id="sidebar">
+    <div class="sidebar-section">
+      <h3>Obszary</h3>
+      <button class="preset-btn" data-preset="polska">🇵🇱 Polska</button>
+      <button class="preset-btn" data-preset="centraleurope">Europa Środkowa</button>
+      <button class="preset-btn" data-preset="trojmiasto">Trójmiasto</button>
+      <button class="preset-btn" data-preset="europe">Europa</button>
+    </div>
+
+    <div class="sidebar-section">
+      <h3>Zakres (BBox)</h3>
+      <div class="bbox-grid">
+        <div class="bbox-field">
+          <label>LAT min</label>
+          <input type="number" id="lamin" step="0.1" placeholder="49">
+        </div>
+        <div class="bbox-field">
+          <label>LAT max</label>
+          <input type="number" id="lamax" step="0.1" placeholder="55">
+        </div>
+        <div class="bbox-field">
+          <label>LON min</label>
+          <input type="number" id="lomin" step="0.1" placeholder="14">
+        </div>
+        <div class="bbox-field">
+          <label>LON max</label>
+          <input type="number" id="lomax" step="0.1" placeholder="24.5">
+        </div>
+      </div>
+    </div>
+
+    <div class="sidebar-section">
+      <h3>Statystyki</h3>
+      <div class="stat-row">
+        <span class="stat-label">Samolotów</span>
+        <span class="stat-value" id="stat-count">—</span>
+      </div>
+      <div class="stat-row">
+        <span class="stat-label">Śr. wysokość</span>
+        <span class="stat-value" id="stat-alt">—</span>
+      </div>
+      <div class="stat-row">
+        <span class="stat-label">Śr. prędkość</span>
+        <span class="stat-value" id="stat-speed">—</span>
+      </div>
+      <div class="stat-row">
+        <span class="stat-label">Maks. skupisko</span>
+        <span class="stat-value" id="stat-density">—</span>
+      </div>
+    </div>
+  </div>
+
+  <!-- MAP -->
+  <div id="map"></div>
+</div>
+
+<!-- ANALYTICS PANEL -->
+<div id="analytics-panel">
+  <!-- Toolbar -->
+  <div class="analytics-toolbar">
+    <div class="time-pills">
+      <button class="time-pill" data-hours="1">1h</button>
+      <button class="time-pill active" data-hours="24">24h</button>
+      <button class="time-pill" data-hours="168">7d</button>
+    </div>
+    <span class="analytics-status" id="analytics-status">Wybierz zakres czasu</span>
+    <div class="collector-badge">
+      <div class="collector-dot inactive" id="collector-dot"></div>
+      <span id="collector-label">Sprawdzanie…</span>
+    </div>
+    <button id="analytics-refresh">Odśwież</button>
+  </div>
+
+  <!-- Stats cards -->
+  <div class="stats-cards">
+    <div class="stat-card">
+      <div class="stat-card-label">Samolotów w bazie</div>
+      <div class="stat-card-value" id="astat-total">—</div>
+      <div class="stat-card-sub">rekordów</div>
+    </div>
+    <div class="stat-card">
+      <div class="stat-card-label">Unikalnych maszyn</div>
+      <div class="stat-card-value" id="astat-unique">—</div>
+      <div class="stat-card-sub">ICAO</div>
+    </div>
+    <div class="stat-card">
+      <div class="stat-card-label">Średnia wysokość</div>
+      <div class="stat-card-value" id="astat-alt">—</div>
+      <div class="stat-card-sub">metrów n.p.m.</div>
+    </div>
+    <div class="stat-card">
+      <div class="stat-card-label">Godzina szczytu</div>
+      <div class="stat-card-value" style="font-size:1rem" id="astat-peak">—</div>
+      <div class="stat-card-sub" id="astat-peak-sub"></div>
+    </div>
+  </div>
+
+  <!-- Timeline chart -->
+  <div class="analytics-section">
+    <h3>Ruch lotniczy w czasie</h3>
+    <div class="chart-wrap">
+      <canvas id="timeline-chart"></canvas>
+    </div>
+  </div>
+
+  <!-- Historical heatmap + countries -->
+  <div class="analytics-section">
+    <h3>Mapa historyczna</h3>
+    <div class="analytics-map-row">
+      <div style="position:relative;">
+        <div class="aheat-btns">
+          <button class="aheat-btn active" data-type="density">Gęstość</button>
+          <button class="aheat-btn" data-type="altitude">Wysokość</button>
+          <button class="aheat-btn" data-type="speed">Prędkość</button>
+        </div>
+        <div id="analytics-map">
+          <div class="historical-label" id="historical-label">Dane historyczne — ostatnie 24h</div>
+        </div>
+      </div>
+      <div>
+        <div style="font-size:0.65rem;letter-spacing:1.2px;text-transform:uppercase;color:var(--text-dim);margin-bottom:10px;">Top 5 krajów rejestracji</div>
+        <div class="chart-wrap tall">
+          <canvas id="countries-chart"></canvas>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<script src="/analytics.js"></script>
+<script>
+// ── Presets ─────────────────────────────────────────────────────────────────
+const PRESETS = {
+  polska:        { lamin: 49,   lamax: 55,   lomin: 14,  lomax: 24.5, center: [52, 19.5],  zoom: 6 },
+  centraleurope: { lamin: 45,   lamax: 56,   lomin: 8,   lomax: 28,   center: [50.5, 18],  zoom: 5 },
+  trojmiasto:    { lamin: 54.1, lamax: 54.7, lomin: 17.8,lomax: 19.0, center: [54.4, 18.4],zoom: 10 },
+  europe:        { lamin: 35,   lamax: 60,   lomin: 5,   lomax: 40,   center: [47.5, 22.5], zoom: 4 }
+};
+
+// ── Map init ─────────────────────────────────────────────────────────────────
+const map = L.map('map', { zoomControl: true, preferCanvas: true });
+
+L.tileLayer('https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png', {
+  attribution: '&copy; <a href="https://carto.com/">CARTO</a>',
+  subdomains: 'abcd',
+  maxZoom: 19
+}).addTo(map);
+
+// Default view: Polska
+map.setView([52, 19.5], 6);
+setPreset('polska');
+
+// Auto-fetch on load
+window.addEventListener('load', () => fetchFlights());
+
+// ── Heatmap layers ───────────────────────────────────────────────────────────
+const heatLayers = {
+  density: null,
+  altitude: null,
+  speed: null
+};
+
+const HEAT_CONFIGS = {
+  density: { radius: 25, blur: 20, maxZoom: 10, gradient: { 0.4: '#00bcd4', 0.7: '#ff9800', 1: '#f44336' } },
+  altitude: { radius: 25, blur: 20, maxZoom: 10, gradient: { 0.4: '#1a237e', 0.7: '#4fc3f7', 1: '#e1f5fe' } },
+  speed:    { radius: 25, blur: 20, maxZoom: 10, gradient: { 0.4: '#4a148c', 0.7: '#e040fb', 1: '#ff80ab' } }
+};
+
+let activeLayer = 'density';
+let flightsData = [];
+let markersGroup = L.layerGroup().addTo(map);
+
+// ── State ────────────────────────────────────────────────────────────────────
+let autoTimer = null;
+let countdownInterval = null;
+let autoSeconds = 30;
+
+// ── DOM refs ─────────────────────────────────────────────────────────────────
+const statusEl   = document.getElementById('status');
+const fetchBtn   = document.getElementById('fetch-btn');
+const autoCheck  = document.getElementById('auto-refresh');
+const countdownEl= document.getElementById('countdown');
+const statCount  = document.getElementById('stat-count');
+const statAlt    = document.getElementById('stat-alt');
+const statSpeed  = document.getElementById('stat-speed');
+const statDensity= document.getElementById('stat-density');
+
+// ── Preset handling ──────────────────────────────────────────────────────────
+function setPreset(name) {
+  const p = PRESETS[name];
+  if (!p) return;
+  document.getElementById('lamin').value = p.lamin;
+  document.getElementById('lamax').value = p.lamax;
+  document.getElementById('lomin').value = p.lomin;
+  document.getElementById('lomax').value = p.lomax;
+  map.flyTo(p.center, p.zoom, { duration: 1 });
+}
+
+document.querySelectorAll('.preset-btn').forEach(btn => {
+  btn.addEventListener('click', () => {
+    setPreset(btn.dataset.preset);
+  });
+});
+
+// ── Layer toggle ─────────────────────────────────────────────────────────────
+document.querySelectorAll('.layer-btn').forEach(btn => {
+  btn.addEventListener('click', () => {
+    document.querySelectorAll('.layer-btn').forEach(b => b.classList.remove('active'));
+    btn.classList.add('active');
+    activeLayer = btn.dataset.layer;
+    renderHeatmaps();
+  });
+});
+
+// ── Fetch ────────────────────────────────────────────────────────────────────
+fetchBtn.addEventListener('click', fetchFlights);
+
+async function fetchFlights() {
+  const lamin = document.getElementById('lamin').value;
+  const lamax = document.getElementById('lamax').value;
+  const lomin = document.getElementById('lomin').value;
+  const lomax = document.getElementById('lomax').value;
+
+  if (!lamin || !lamax || !lomin || !lomax) {
+    setStatus('Uzupełnij zakres BBox', true);
+    return;
+  }
+
+  fetchBtn.disabled = true;
+  fetchBtn.classList.add('loading');
+  setStatus('Pobieranie danych…', false);
+
+  try {
+    const res = await fetch(`/api/flights?lamin=${lamin}&lamax=${lamax}&lomin=${lomin}&lomax=${lomax}`);
+    const json = await res.json();
+
+    if (json.error && json.flights.length === 0) {
+      setStatus(`Błąd: ${json.error}`, true);
+    } else {
+      flightsData = json.flights || [];
+      const now = new Date();
+      const hhmm = now.toTimeString().slice(0, 8);
+      const note = json.cached ? ' (cache)' : '';
+      setStatus(`${flightsData.length} samolotów — ${hhmm}${note}`, false);
+      renderAll();
+    }
+  } catch (err) {
+    setStatus(`Błąd sieci: ${err.message}`, true);
+  } finally {
+    fetchBtn.disabled = false;
+    fetchBtn.classList.remove('loading');
+  }
+}
+
+// ── Render ───────────────────────────────────────────────────────────────────
+function renderAll() {
+  updateStats();
+  renderHeatmaps();
+  renderMarkers();
+}
+
+function renderHeatmaps() {
+  // Remove all existing heat layers
+  Object.values(heatLayers).forEach(l => { if (l) map.removeLayer(l); });
+
+  if (flightsData.length === 0) return;
+
+  const points = {
+    density: flightsData.map(f => [f.lat, f.lon, 1.0]),
+    altitude: flightsData.map(f => [f.lat, f.lon, Math.min(f.alt / 13000, 1.0)]),
+    speed:    flightsData.map(f => [f.lat, f.lon, Math.min(f.speed / 1000, 1.0)])
+  };
+
+  Object.keys(heatLayers).forEach(key => {
+    heatLayers[key] = L.heatLayer(points[key], HEAT_CONFIGS[key]);
+  });
+
+  heatLayers[activeLayer].addTo(map);
+}
+
+// ── Plane icon colour by altitude ─────────────────────────────────────────────
+function altColor(alt) {
+  if (!alt || alt < 1000)  return '#ef5350'; // red — low
+  if (alt < 6000)          return '#ff9800'; // orange — mid
+  return '#4fc3f7';                           // cyan — cruise
+}
+
+function headingCompass(h) {
+  if (h === null || h === undefined) return '';
+  const dirs = ['N','NE','E','SE','S','SW','W','NW'];
+  return ' (' + dirs[Math.round(h / 45) % 8] + ')';
+}
+
+// markersRef: icao → marker, for search
+const markersRef = new Map();
+
+function renderMarkers() {
+  markersGroup.clearLayers();
+  markersRef.clear();
+
+  if (map.getZoom() < 6 || flightsData.length === 0) return;
+
+  flightsData.forEach(f => {
+    const color = altColor(f.alt);
+    const icon = L.divIcon({
+      html: `<div class="plane-icon" style="transform:rotate(${f.heading || 0}deg);color:${color};text-shadow:0 0 6px ${color}88">✈</div>`,
+      className: '',
+      iconSize: [20, 20],
+      iconAnchor: [10, 10]
+    });
+
+    const marker = L.marker([f.lat, f.lon], { icon });
+    marker.bindPopup(buildPopup(f), { maxWidth: 260 });
+    markersGroup.addLayer(marker);
+    markersRef.set(f.icao.toLowerCase(), marker);
+    markersRef.set((f.callsign || '').toLowerCase(), marker);
+  });
+}
+
+map.on('zoomend', () => {
+  if (flightsData.length > 0) renderMarkers();
+});
+
+// Lazy-load photo when popup opens
+map.on('popupopen', async (e) => {
+  const el = e.popup.getElement();
+  const wrap = el?.querySelector('[data-photo-icao]');
+  if (!wrap) return;
+  const icao = wrap.dataset.photoIcao;
+  try {
+    const res = await fetch(`/api/aircraft/${icao}`);
+    const data = await res.json();
+    if (data.photoUrl) {
+      wrap.innerHTML = `<img src="${data.photoUrl}" alt="Zdjęcie ${icao}" loading="lazy">`;
+    } else {
+      wrap.remove();
+    }
+  } catch {
+    wrap.remove();
+  }
+  e.popup.update(); // re-position after content change
+});
+
+function buildPopup(f) {
+  const alt    = f.alt   ? `${Math.round(f.alt)} m`                         : '—';
+  const spdKmh = f.speed ? `${Math.round(f.speed * 3.6)} km/h`              : '—';
+  const hdg    = f.heading != null
+    ? `${Math.round(f.heading)}°${headingCompass(f.heading)}`
+    : '—';
+
+  const title    = f.callsign || f.icao;
+  const reg      = f.registration ? `<span class="popup-reg">• ${f.registration}</span>` : '';
+  const model    = (f.manufacturer || f.model)
+    ? `<div class="popup-model">${[f.manufacturer, f.model].filter(Boolean).join(' ')}</div>`
+    : '';
+  const operator = f.operator
+    ? `<div class="popup-operator">${f.operator}</div>`
+    : '';
+
+  return `
+    <div class="popup-title">✈ ${title} ${reg}</div>
+    ${model}
+    ${operator}
+    <hr class="popup-divider">
+    <div class="popup-row"><span class="popup-key">Wysokość</span><span class="popup-val">${alt}</span></div>
+    <div class="popup-row"><span class="popup-key">Prędkość</span><span class="popup-val">${spdKmh}</span></div>
+    <div class="popup-row"><span class="popup-key">Kurs</span><span class="popup-val">${hdg}</span></div>
+    <div class="popup-row"><span class="popup-key">Kraj reg.</span><span class="popup-val">${f.country || '—'}</span></div>
+    <div class="popup-row"><span class="popup-key">ICAO</span><span class="popup-val">${f.icao}</span></div>
+    <hr class="popup-divider">
+    <div class="popup-photo-wrap" data-photo-icao="${f.icao}">
+      <span class="popup-photo-loading">Ładowanie zdjęcia…</span>
+    </div>
+  `;
+}
+
+// ── Stats ─────────────────────────────────────────────────────────────────────
+function updateStats() {
+  const count = flightsData.length;
+  statCount.textContent = count;
+
+  if (count === 0) {
+    statAlt.textContent = '—';
+    statSpeed.textContent = '—';
+    statDensity.textContent = '—';
+    return;
+  }
+
+  const avgAlt = flightsData.reduce((s, f) => s + (f.alt || 0), 0) / count;
+  const avgSpd = flightsData.reduce((s, f) => s + (f.speed || 0), 0) / count;
+
+  statAlt.textContent = `${Math.round(avgAlt)} m`;
+  statSpeed.textContent = `${Math.round(avgSpd)} m/s`;
+
+  // Rough density: count within a 1-degree grid cell
+  const grid = {};
+  flightsData.forEach(f => {
+    const key = `${Math.round(f.lat)},${Math.round(f.lon)}`;
+    grid[key] = (grid[key] || 0) + 1;
+  });
+  const maxDensity = Math.max(...Object.values(grid));
+  statDensity.textContent = `${maxDensity} / cel`;
+}
+
+// ── Status ───────────────────────────────────────────────────────────────────
+function setStatus(msg, isError) {
+  statusEl.textContent = msg;
+  statusEl.className = isError ? 'error' : '';
+}
+
+// ── Auto-refresh ─────────────────────────────────────────────────────────────
+autoCheck.addEventListener('change', () => {
+  if (autoCheck.checked) {
+    startAutoRefresh();
+  } else {
+    stopAutoRefresh();
+  }
+});
+
+function startAutoRefresh() {
+  autoSeconds = 30;
+  countdownEl.textContent = `(${autoSeconds}s)`;
+
+  clearInterval(countdownInterval);
+  countdownInterval = setInterval(() => {
+    autoSeconds--;
+    if (autoSeconds <= 0) {
+      autoSeconds = 30;
+      fetchFlights();
+    }
+    countdownEl.textContent = `(${autoSeconds}s)`;
+  }, 1000);
+}
+
+function stopAutoRefresh() {
+  clearInterval(countdownInterval);
+  countdownEl.textContent = '';
+}
+
+// ── Search ────────────────────────────────────────────────────────────────────
+const searchInput = document.getElementById('search-input');
+const searchMsg   = document.getElementById('search-msg');
+
+function showSearchMsg(msg, autoHide = true) {
+  searchMsg.textContent = msg;
+  searchMsg.style.display = 'block';
+  if (autoHide) setTimeout(() => { searchMsg.style.display = 'none'; }, 2500);
+}
+
+searchInput.addEventListener('keydown', (e) => {
+  if (e.key !== 'Enter') return;
+  const q = searchInput.value.trim().toLowerCase();
+  if (!q) return;
+
+  // Ensure markers are rendered (zoom >= 6)
+  if (map.getZoom() < 6) map.setZoom(7);
+
+  const marker = markersRef.get(q);
+  if (marker) {
+    const pos = marker.getLatLng();
+    map.flyTo(pos, Math.max(map.getZoom(), 8), { duration: 0.8 });
+    marker.openPopup();
+    searchMsg.style.display = 'none';
+  } else {
+    showSearchMsg('Nie znaleziono w aktualnych danych');
+  }
+});
+
+// Hide msg on outside click
+document.addEventListener('click', (e) => {
+  if (!e.target.closest('#search-wrap')) searchMsg.style.display = 'none';
+});
+
+// ── Alert badge (poll every 60s) ──────────────────────────────────────────────
+async function pollAlertBadge() {
+  try {
+    const s = await fetch('/api/alerts/stats').then(r => r.json());
+    const badge = document.getElementById('alert-badge');
+    if (s.totalEvents24h > 0) {
+      badge.textContent = s.totalEvents24h;
+      badge.style.display = '';
+    } else {
+      badge.style.display = 'none';
+    }
+  } catch { /* ignore */ }
+}
+
+pollAlertBadge();
+setInterval(pollAlertBadge, 60000);
+
+// ── Tab switching ─────────────────────────────────────────────────────────────
+const liveMain      = document.getElementById('main');
+const analyticsPanel= document.getElementById('analytics-panel');
+const liveControls  = document.getElementById('live-controls');
+
+document.querySelectorAll('.tab-nav-btn').forEach(btn => {
+  btn.addEventListener('click', () => {
+    document.querySelectorAll('.tab-nav-btn').forEach(b => b.classList.remove('active'));
+    btn.classList.add('active');
+
+    if (btn.dataset.tab === 'analytics') {
+      liveMain.style.display = 'none';
+      liveControls.style.display = 'none';
+      analyticsPanel.classList.add('visible');
+      Analytics.init();
+      Analytics.wire();
+      Analytics.load();
+    } else {
+      liveMain.style.display = 'flex';
+      liveControls.style.display = 'flex';
+      analyticsPanel.classList.remove('visible');
+      // Invalidate map size after re-show
+      setTimeout(() => map.invalidateSize(), 50);
+    }
+  });
+});
+</script>
+</body>
+</html>

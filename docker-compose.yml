@@ -1,0 +1,14 @@
+version: '3.8'
+services:
+  flightheat:
+    build: .
+    ports:
+      - "3000:3000"
+    volumes:
+      - ./data:/app/data
+    environment:
+      - OPENSKY_USER=
+      - OPENSKY_PASS=
+      - COLLECT_BBOX=49,55,14,24.5
+      - DB_PATH=/app/data/flightheat.db
+    restart: unless-stopped

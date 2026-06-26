@@ -1,0 +1,604 @@
+<!DOCTYPE html>
+<html lang="pl">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>FlightHeat — Alerty</title>
+<style>
+  *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+  :root {
+    --bg: #0a0e1a;
+    --surface: #111827;
+    --card: #0d1525;
+    --border: #1e2d45;
+    --cyan: #4fc3f7;
+    --cyan-dim: #1a6b8a;
+    --text: #cdd6f4;
+    --text-dim: #6b7a99;
+    --red: #f44336;
+    --green: #4caf50;
+    --orange: #ff9800;
+  }
+
+  body {
+    font-family: 'Courier New', Courier, monospace;
+    background: var(--bg);
+    color: var(--text);
+    min-height: 100vh;
+  }
+
+  /* ── Header ─────────────────────────────────────────────── */
+  header {
+    background: var(--surface);
+    border-bottom: 1px solid var(--border);
+    padding: 0 20px;
+    height: 52px;
+    display: flex;
+    align-items: center;
+    gap: 16px;
+  }
+
+  .header-back {
+    color: var(--text-dim);
+    text-decoration: none;
+    font-size: 0.78rem;
+    transition: color 0.15s;
+  }
+
+  .header-back:hover { color: var(--cyan); }
+
+  .header-title {
+    font-size: 1rem;
+    font-weight: bold;
+    letter-spacing: 2px;
+  }
+
+  .header-title span { color: var(--cyan); }
+
+  /* ── Stats bar ──────────────────────────────────────────── */
+  #stats-bar {
+    background: var(--surface);
+    border-bottom: 1px solid var(--border);
+    padding: 8px 20px;
+    display: flex;
+    align-items: center;
+    gap: 24px;
+    font-size: 0.78rem;
+    color: var(--text-dim);
+    flex-wrap: wrap;
+  }
+
+  .stat-chip { display: flex; align-items: center; gap: 6px; }
+  .stat-chip strong { color: var(--cyan); }
+
+  #last-event-time { color: var(--orange); }
+
+  .dot { width: 8px; height: 8px; border-radius: 50%; background: var(--green); box-shadow: 0 0 6px var(--green); }
+  .dot.off { background: var(--text-dim); box-shadow: none; }
+
+  /* ── Main layout ─────────────────────────────────────────── */
+  .page { max-width: 1300px; margin: 0 auto; padding: 20px; }
+
+  .two-col {
+    display: grid;
+    grid-template-columns: 1fr 340px;
+    gap: 20px;
+    align-items: start;
+  }
+
+  @media (max-width: 900px) { .two-col { grid-template-columns: 1fr; } }
+
+  /* ── Section titles ──────────────────────────────────────── */
+  .section-title {
+    font-size: 0.65rem;
+    letter-spacing: 1.5px;
+    text-transform: uppercase;
+    color: var(--text-dim);
+    margin-bottom: 12px;
+    border-bottom: 1px solid var(--border);
+    padding-bottom: 6px;
+  }
+
+  /* ── Rule card ───────────────────────────────────────────── */
+  .rule-card {
+    background: var(--card);
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    padding: 14px 16px;
+    margin-bottom: 10px;
+    display: flex;
+    align-items: flex-start;
+    gap: 14px;
+  }
+
+  .rule-card.disabled { opacity: 0.5; }
+
+  .rule-toggle { flex-shrink: 0; margin-top: 2px; }
+
+  /* Toggle switch */
+  .toggle-switch { position: relative; display: inline-block; width: 36px; height: 20px; }
+  .toggle-switch input { opacity: 0; width: 0; height: 0; }
+  .toggle-slider {
+    position: absolute; inset: 0; background: var(--border);
+    border-radius: 20px; cursor: pointer; transition: background 0.2s;
+  }
+  .toggle-slider::before {
+    content: ''; position: absolute;
+    width: 14px; height: 14px; border-radius: 50%; background: #fff;
+    left: 3px; top: 3px; transition: transform 0.2s;
+  }
+  .toggle-switch input:checked + .toggle-slider { background: var(--cyan); }
+  .toggle-switch input:checked + .toggle-slider::before { transform: translateX(16px); }
+
+  .rule-body { flex: 1; min-width: 0; }
+  .rule-name { font-size: 0.88rem; font-weight: bold; color: var(--text); margin-bottom: 4px; }
+  .rule-criteria { font-size: 0.72rem; color: var(--text-dim); }
+  .rule-criteria span { display: inline-block; background: var(--border); border-radius: 3px; padding: 1px 6px; margin: 2px 2px 0 0; }
+
+  .rule-delete {
+    flex-shrink: 0;
+    background: transparent;
+    border: 1px solid var(--border);
+    color: var(--text-dim);
+    padding: 4px 8px;
+    font-family: inherit;
+    font-size: 0.72rem;
+    cursor: pointer;
+    border-radius: 3px;
+    transition: all 0.15s;
+    margin-top: 1px;
+  }
+  .rule-delete:hover { border-color: var(--red); color: var(--red); }
+
+  .no-rules { color: var(--text-dim); font-size: 0.82rem; padding: 20px 0; }
+
+  /* ── Form ────────────────────────────────────────────────── */
+  .form-card {
+    background: var(--card);
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    padding: 16px;
+  }
+
+  .form-field { margin-bottom: 12px; }
+  .form-field label {
+    display: block;
+    font-size: 0.65rem;
+    letter-spacing: 0.8px;
+    text-transform: uppercase;
+    color: var(--text-dim);
+    margin-bottom: 4px;
+  }
+
+  .form-field input, .form-field textarea {
+    width: 100%;
+    background: var(--bg);
+    border: 1px solid var(--border);
+    color: var(--text);
+    padding: 6px 8px;
+    font-family: inherit;
+    font-size: 0.78rem;
+    border-radius: 3px;
+    outline: none;
+    transition: border-color 0.15s;
+  }
+
+  .form-field input:focus, .form-field textarea:focus { border-color: var(--cyan-dim); }
+  .form-field input::placeholder, .form-field textarea::placeholder { color: var(--text-dim); }
+  .form-field textarea { resize: vertical; min-height: 52px; }
+
+  .bbox-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 6px; }
+
+  .preset-row { display: flex; gap: 4px; flex-wrap: wrap; margin-bottom: 8px; }
+
+  .preset-btn {
+    background: transparent;
+    border: 1px solid var(--border);
+    color: var(--text-dim);
+    padding: 3px 10px;
+    font-family: inherit;
+    font-size: 0.72rem;
+    cursor: pointer;
+    border-radius: 3px;
+    transition: all 0.15s;
+  }
+  .preset-btn:hover { border-color: var(--cyan-dim); color: var(--cyan); }
+
+  .submit-btn {
+    width: 100%;
+    background: var(--cyan);
+    border: none;
+    color: #000;
+    padding: 8px;
+    font-family: inherit;
+    font-size: 0.82rem;
+    font-weight: bold;
+    cursor: pointer;
+    border-radius: 3px;
+    transition: opacity 0.15s;
+    margin-top: 4px;
+  }
+  .submit-btn:hover { opacity: 0.85; }
+  .submit-btn:disabled { opacity: 0.5; cursor: not-allowed; }
+
+  .form-msg { font-size: 0.72rem; margin-top: 8px; min-height: 18px; }
+  .form-msg.ok  { color: var(--green); }
+  .form-msg.err { color: var(--red); }
+
+  /* ── Events table ─────────────────────────────────────────── */
+  .events-section { margin-top: 28px; }
+
+  .events-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    margin-bottom: 12px;
+  }
+
+  .auto-badge {
+    font-size: 0.68rem;
+    color: var(--text-dim);
+    display: flex;
+    align-items: center;
+    gap: 6px;
+  }
+
+  .auto-badge .dot { width: 6px; height: 6px; animation: pulse 2s infinite; }
+  @keyframes pulse { 0%,100%{opacity:1} 50%{opacity:0.3} }
+
+  .table-wrap { overflow-x: auto; }
+
+  table {
+    width: 100%;
+    border-collapse: collapse;
+    font-size: 0.75rem;
+  }
+
+  th {
+    text-align: left;
+    padding: 6px 10px;
+    color: var(--text-dim);
+    border-bottom: 1px solid var(--border);
+    font-weight: normal;
+    letter-spacing: 0.5px;
+    white-space: nowrap;
+  }
+
+  td {
+    padding: 7px 10px;
+    border-bottom: 1px solid #0f1a2e;
+    white-space: nowrap;
+  }
+
+  tr:hover td { background: rgba(79,195,247,0.03); }
+
+  .badge-rule {
+    display: inline-block;
+    padding: 1px 7px;
+    border-radius: 3px;
+    font-size: 0.68rem;
+    max-width: 160px;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+
+  .alt-low  { color: #ef5350; }
+  .alt-mid  { color: var(--orange); }
+  .alt-high { color: var(--cyan); }
+
+  .no-events { color: var(--text-dim); font-size: 0.82rem; padding: 20px 0; }
+
+  .coords-link { color: var(--cyan-dim); text-decoration: none; font-size: 0.7rem; }
+  .coords-link:hover { color: var(--cyan); }
+</style>
+</head>
+<body>
+
+<header>
+  <a class="header-back" href="/">← Mapa live</a>
+  <div class="header-title">✈ FLIGHTHEAT / <span>ALERTY</span></div>
+</header>
+
+<div id="stats-bar">
+  <div class="stat-chip"><div class="dot" id="dot-active"></div> <span><strong id="s-enabled">—</strong> reguł aktywnych</span></div>
+  <div class="stat-chip">Zdarzeń (24h): <strong id="s-events24">—</strong></div>
+  <div class="stat-chip">Ostatnie: <span id="last-event-time">—</span></div>
+</div>
+
+<div class="page">
+  <div class="two-col">
+
+    <!-- Left: rule list -->
+    <div>
+      <div class="section-title">Aktywne reguły</div>
+      <div id="rules-list"><div class="no-rules">Ładowanie…</div></div>
+    </div>
+
+    <!-- Right: new rule form -->
+    <div>
+      <div class="section-title">Nowa reguła</div>
+      <div class="form-card">
+        <form id="rule-form">
+          <div class="form-field">
+            <label>Nazwa reguły *</label>
+            <input type="text" id="f-name" placeholder="np. Obserwacja lotniska" required>
+          </div>
+
+          <div class="form-field">
+            <label>Obszar geograficzny (opcjonalnie)</label>
+            <div class="preset-row">
+              <button type="button" class="preset-btn" data-bbox="49,55,14,24.5">Polska</button>
+              <button type="button" class="preset-btn" data-bbox="54.1,54.7,17.8,19.0">Trójmiasto</button>
+              <button type="button" class="preset-btn" data-bbox="54.05,54.25,19.3,19.7">Elbląg</button>
+              <button type="button" class="preset-btn" data-bbox="">Wyczyść</button>
+            </div>
+            <div class="bbox-grid">
+              <input type="number" id="f-lamin" placeholder="LAT min" step="0.01">
+              <input type="number" id="f-lamax" placeholder="LAT max" step="0.01">
+              <input type="number" id="f-lomin" placeholder="LON min" step="0.01">
+              <input type="number" id="f-lomax" placeholder="LON max" step="0.01">
+            </div>
+          </div>
+
+          <div class="form-field">
+            <label>Maks. wysokość (m) — alert gdy PONIŻEJ</label>
+            <input type="number" id="f-max-alt" placeholder="np. 1000" step="50" min="0">
+          </div>
+
+          <div class="form-field">
+            <label>Min. prędkość (km/h) — alert gdy POWYŻEJ</label>
+            <input type="number" id="f-min-speed" placeholder="np. 900" step="10" min="0">
+          </div>
+
+          <div class="form-field">
+            <label>Kraj rejestracji (rozdziel przecinkami)</label>
+            <input type="text" id="f-country" placeholder="np. Russia, Belarus">
+          </div>
+
+          <div class="form-field">
+            <label>Lista ICAO (opcjonalnie)</label>
+            <textarea id="f-icao-list" placeholder="abc123, def456, ..."></textarea>
+          </div>
+
+          <div class="form-field">
+            <label>Callsign zawiera</label>
+            <input type="text" id="f-callsign" placeholder="np. RYR">
+          </div>
+
+          <button type="submit" class="submit-btn" id="submit-btn">Dodaj regułę</button>
+          <div class="form-msg" id="form-msg"></div>
+        </form>
+      </div>
+    </div>
+  </div>
+
+  <!-- Events table -->
+  <div class="events-section">
+    <div class="events-header">
+      <div class="section-title" style="margin-bottom:0">Ostatnie zdarzenia (24h)</div>
+      <div class="auto-badge"><div class="dot"></div> odświeżanie co 30s</div>
+    </div>
+    <div class="table-wrap">
+      <table id="events-table">
+        <thead>
+          <tr>
+            <th>Czas</th>
+            <th>Reguła</th>
+            <th>Callsign</th>
+            <th>ICAO</th>
+            <th>Wys.</th>
+            <th>Prędkość</th>
+            <th>Kraj</th>
+            <th>Pozycja</th>
+          </tr>
+        </thead>
+        <tbody id="events-body">
+          <tr><td colspan="8" class="no-events">Ładowanie…</td></tr>
+        </tbody>
+      </table>
+    </div>
+  </div>
+</div>
+
+<script>
+// Colour palette for rules (cycle by rule_id)
+const RULE_COLORS = ['#4fc3f7','#ff9800','#e040fb','#4caf50','#ef5350','#ffeb3b','#00bcd4'];
+
+function ruleColor(id) { return RULE_COLORS[(id - 1) % RULE_COLORS.length]; }
+
+function altClass(alt) {
+  if (!alt || alt < 1000) return 'alt-low';
+  if (alt < 6000)          return 'alt-mid';
+  return 'alt-high';
+}
+
+function fmtTime(iso) {
+  if (!iso) return '—';
+  const d = new Date(iso);
+  return d.toLocaleString('pl-PL', { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' });
+}
+
+function fmtAlt(a) { return a != null ? `${Math.round(a)} m` : '—'; }
+function fmtSpd(s) { return s != null ? `${Math.round(s * 3.6)} km/h` : '—'; }
+
+// ── Stats ──────────────────────────────────────────────────────────────────────
+async function loadStats() {
+  try {
+    const s = await fetch('/api/alerts/stats').then(r => r.json());
+    document.getElementById('s-enabled').textContent  = s.enabledRules;
+    document.getElementById('s-events24').textContent = s.totalEvents24h;
+    document.getElementById('last-event-time').textContent = s.lastEvent ? fmtTime(s.lastEvent) : 'brak';
+    document.getElementById('dot-active').className = s.enabledRules > 0 ? 'dot' : 'dot off';
+  } catch { /* ignore */ }
+}
+
+// ── Rules ──────────────────────────────────────────────────────────────────────
+async function loadRules() {
+  const rules = await fetch('/api/alerts/rules').then(r => r.json());
+  const list = document.getElementById('rules-list');
+
+  if (!rules.length) {
+    list.innerHTML = '<div class="no-rules">Brak reguł. Dodaj pierwszą regułę →</div>';
+    return;
+  }
+
+  list.innerHTML = rules.map(r => {
+    const criteria = buildCriteriaBadges(r);
+    const color = ruleColor(r.id);
+    return `
+      <div class="rule-card ${r.enabled ? '' : 'disabled'}" id="rule-${r.id}">
+        <div class="rule-toggle">
+          <label class="toggle-switch">
+            <input type="checkbox" ${r.enabled ? 'checked' : ''} onchange="toggleRule(${r.id}, this.checked)">
+            <span class="toggle-slider"></span>
+          </label>
+        </div>
+        <div class="rule-body">
+          <div class="rule-name" style="color:${color}">${escHtml(r.name)}</div>
+          <div class="rule-criteria">${criteria || '<span style="color:var(--text-dim);font-style:italic">brak filtrów — pasuje do wszystkiego</span>'}</div>
+        </div>
+        <button class="rule-delete" onclick="deleteRule(${r.id})">Usuń</button>
+      </div>
+    `;
+  }).join('');
+}
+
+function buildCriteriaBadges(r) {
+  const parts = [];
+  if (r.max_alt    != null) parts.push(`alt &lt; ${r.max_alt} m`);
+  if (r.min_speed  != null) parts.push(`spd &gt; ${r.min_speed} km/h`);
+  if (r.max_speed  != null) parts.push(`spd &lt; ${r.max_speed} km/h`);
+  if (r.country)            parts.push(`kraj: ${escHtml(r.country)}`);
+  if (r.icao_list)          parts.push(`ICAO: ${escHtml(r.icao_list.slice(0,30))}…`);
+  if (r.callsign_contains)  parts.push(`callsign ∋ ${escHtml(r.callsign_contains)}`);
+  if (r.lamin != null)      parts.push(`bbox: ${r.lamin}–${r.lamax}, ${r.lomin}–${r.lomax}`);
+  return parts.map(p => `<span>${p}</span>`).join('');
+}
+
+async function toggleRule(id, enabled) {
+  await fetch(`/api/alerts/rules/${id}`, {
+    method: 'PATCH',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ enabled: enabled ? 1 : 0 })
+  });
+  const card = document.getElementById(`rule-${id}`);
+  if (card) card.classList.toggle('disabled', !enabled);
+  loadStats();
+}
+
+async function deleteRule(id) {
+  if (!confirm('Usunąć regułę i wszystkie jej zdarzenia?')) return;
+  await fetch(`/api/alerts/rules/${id}`, { method: 'DELETE' });
+  loadRules();
+  loadStats();
+}
+
+// ── Events table ───────────────────────────────────────────────────────────────
+async function loadEvents() {
+  const rows = await fetch('/api/alerts/events?hours=24&limit=100').then(r => r.json());
+  const body = document.getElementById('events-body');
+
+  if (!rows.length) {
+    body.innerHTML = '<tr><td colspan="8" class="no-events">Brak zdarzeń w ciągu 24h</td></tr>';
+    return;
+  }
+
+  body.innerHTML = rows.map(e => {
+    const color = ruleColor(e.rule_id || 0);
+    const mapsUrl = `https://www.google.com/maps?q=${e.lat},${e.lon}`;
+    return `
+      <tr>
+        <td>${fmtTime(e.triggered_at)}</td>
+        <td><span class="badge-rule" style="background:${color}22;color:${color};border:1px solid ${color}44">${escHtml(e.rule_name || '—')}</span></td>
+        <td>${escHtml(e.callsign || '—')}</td>
+        <td style="color:var(--text-dim)">${escHtml(e.icao || '—')}</td>
+        <td class="${altClass(e.alt)}">${fmtAlt(e.alt)}</td>
+        <td>${fmtSpd(e.speed)}</td>
+        <td>${escHtml(e.country || '—')}</td>
+        <td><a class="coords-link" href="${mapsUrl}" target="_blank">${e.lat?.toFixed(3)}, ${e.lon?.toFixed(3)}</a></td>
+      </tr>
+    `;
+  }).join('');
+}
+
+// ── New rule form ──────────────────────────────────────────────────────────────
+document.querySelectorAll('.preset-btn[data-bbox]').forEach(btn => {
+  btn.addEventListener('click', () => {
+    const parts = btn.dataset.bbox.split(',');
+    document.getElementById('f-lamin').value = parts[0] || '';
+    document.getElementById('f-lamax').value = parts[1] || '';
+    document.getElementById('f-lomin').value = parts[2] || '';
+    document.getElementById('f-lomax').value = parts[3] || '';
+  });
+});
+
+document.getElementById('rule-form').addEventListener('submit', async (e) => {
+  e.preventDefault();
+  const btn = document.getElementById('submit-btn');
+  const msg = document.getElementById('form-msg');
+  btn.disabled = true;
+
+  const payload = {
+    name:              document.getElementById('f-name').value.trim(),
+    lamin:             numOrNull('f-lamin'),
+    lamax:             numOrNull('f-lamax'),
+    lomin:             numOrNull('f-lomin'),
+    lomax:             numOrNull('f-lomax'),
+    max_alt:           numOrNull('f-max-alt'),
+    min_speed:         numOrNull('f-min-speed'),
+    country:           strOrNull('f-country'),
+    icao_list:         strOrNull('f-icao-list'),
+    callsign_contains: strOrNull('f-callsign')
+  };
+
+  try {
+    const res = await fetch('/api/alerts/rules', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload)
+    });
+    if (!res.ok) {
+      const err = await res.json();
+      throw new Error(err.error || `HTTP ${res.status}`);
+    }
+    msg.textContent = 'Reguła dodana ✓';
+    msg.className = 'form-msg ok';
+    e.target.reset();
+    loadRules();
+    loadStats();
+  } catch (err) {
+    msg.textContent = 'Błąd: ' + err.message;
+    msg.className = 'form-msg err';
+  } finally {
+    btn.disabled = false;
+    setTimeout(() => { msg.textContent = ''; }, 3000);
+  }
+});
+
+function numOrNull(id) {
+  const v = document.getElementById(id).value.trim();
+  return v ? parseFloat(v) : null;
+}
+
+function strOrNull(id) {
+  const v = document.getElementById(id).value.trim();
+  return v || null;
+}
+
+function escHtml(str) {
+  return String(str).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+}
+
+// ── Boot + auto-refresh ────────────────────────────────────────────────────────
+function refresh() {
+  loadStats();
+  loadRules();
+  loadEvents();
+}
+
+refresh();
+setInterval(refresh, 30000);
+</script>
+</body>
+</html>

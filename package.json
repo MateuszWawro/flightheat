@@ -1,0 +1,17 @@
+{
+  "name": "flightheat",
+  "version": "1.0.0",
+  "description": "Flight heatmap dashboard powered by OpenSky Network",
+  "main": "server.js",
+  "scripts": {
+    "start": "node server.js",
+    "import-db": "node scripts/import-aircraft-db.js"
+  },
+  "dependencies": {
+    "better-sqlite3": "^9.4.3",
+    "csv-parse": "^5.5.5",
+    "express": "^4.18.2",
+    "node-cron": "^3.0.3",
+    "node-fetch": "^2.7.0"
+  }
+}
